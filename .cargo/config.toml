@@ -1,0 +1,3 @@
+[env]
+LIBRARY_PATH = "/opt/homebrew/opt/sdl2/lib"
+CPATH = "/opt/homebrew/opt/sdl2/include"
