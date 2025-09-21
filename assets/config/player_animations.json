@@ -1,0 +1,54 @@
+{
+  "frame_width": 96,
+  "frame_height": 96,
+  "animations": {
+    "Idle": {
+      "frames": [
+        { "x": 0, "y": 0, "duration_ms": 100 },
+        { "x": 96, "y": 0, "duration_ms": 100 },
+        { "x": 192, "y": 0, "duration_ms": 100 },
+        { "x": 288, "y": 0, "duration_ms": 100 },
+        { "x": 384, "y": 0, "duration_ms": 100 },
+        { "x": 480, "y": 0, "duration_ms": 100 },
+        { "x": 576, "y": 0, "duration_ms": 100 },
+        { "x": 672, "y": 0, "duration_ms": 100 },
+        { "x": 768, "y": 0, "duration_ms": 100 },
+        { "x": 864, "y": 0, "duration_ms": 100 }
+      ],
+      "loop_animation": true
+    },
+    "Running": {
+      "frames": [
+        { "x": 0, "y": 0, "duration_ms": 40 },
+        { "x": 96, "y": 0, "duration_ms": 40 },
+        { "x": 192, "y": 0, "duration_ms": 40 },
+        { "x": 288, "y": 0, "duration_ms": 40 },
+        { "x": 384, "y": 0, "duration_ms": 40 },
+        { "x": 480, "y": 0, "duration_ms": 40 },
+        { "x": 576, "y": 0, "duration_ms": 40 },
+        { "x": 672, "y": 0, "duration_ms": 40 },
+        { "x": 768, "y": 0, "duration_ms": 40 },
+        { "x": 864, "y": 0, "duration_ms": 40 },
+        { "x": 960, "y": 0, "duration_ms": 40 },
+        { "x": 1056, "y": 0, "duration_ms": 40 },
+        { "x": 1152, "y": 0, "duration_ms": 40 },
+        { "x": 1248, "y": 0, "duration_ms": 40 },
+        { "x": 1344, "y": 0, "duration_ms": 40 },
+        { "x": 1440, "y": 0, "duration_ms": 40 }
+      ],
+      "loop_animation": true
+    },
+    "Attack": {
+      "frames": [
+        { "x": 0, "y": 0, "duration_ms": 60 },
+        { "x": 96, "y": 0, "duration_ms": 60 },
+        { "x": 192, "y": 0, "duration_ms": 60 },
+        { "x": 288, "y": 0, "duration_ms": 60 },
+        { "x": 384, "y": 0, "duration_ms": 60 },
+        { "x": 480, "y": 0, "duration_ms": 60 },
+        { "x": 576, "y": 0, "duration_ms": 60 }
+      ],
+      "loop_animation": false
+    }
+  }
+}
