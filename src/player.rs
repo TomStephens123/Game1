@@ -1,8 +1,8 @@
 use crate::animation::{AnimationController, AnimationState, determine_animation_state};
+use sdl2::keyboard::Scancode;
 use sdl2::rect::Rect;
 use sdl2::render::Canvas;
 use sdl2::video::Window;
-use sdl2::keyboard::Scancode;
 
 pub struct Player<'a> {
     pub x: i32,
@@ -108,7 +108,6 @@ impl<'a> Player<'a> {
         }
     }
 
-
     pub fn current_animation_state(&self) -> &AnimationState {
         self.animation_controller.current_state()
     }
@@ -121,11 +120,9 @@ impl<'a> Player<'a> {
         (self.velocity_x, self.velocity_y)
     }
 
-
     pub fn start_attack(&mut self) {
         if !self.is_attacking {
             self.is_attacking = true;
         }
     }
 }
-

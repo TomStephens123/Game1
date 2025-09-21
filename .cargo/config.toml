@@ -1,3 +1,12 @@
+# Cargo configuration for Game1 project
+# This file configures build settings for better SDL2 support on macOS
+
+[target.'cfg(target_os = "macos")']
+rustflags = [
+    "-L", "/opt/homebrew/lib",
+    "-C", "link-arg=-Wl,-rpath,/opt/homebrew/lib"
+]
+
 [env]
-LIBRARY_PATH = "/opt/homebrew/opt/sdl2/lib"
-CPATH = "/opt/homebrew/opt/sdl2/include"
+# Set include path for SDL2 headers
+CPATH = "/opt/homebrew/include"

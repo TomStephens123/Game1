@@ -88,7 +88,6 @@ impl<'a> AnimationController<'a> {
         self.sprite_sheets.get(&self.current_state)
     }
 
-
     pub fn current_state(&self) -> &AnimationState {
         &self.current_state
     }
@@ -111,7 +110,9 @@ impl AnimationConfig {
 
     pub fn create_frames(&self, state: &AnimationState) -> Vec<Frame> {
         if let Some(animation_data) = self.animations.get(state) {
-            animation_data.frames.iter()
+            animation_data
+                .frames
+                .iter()
                 .map(|frame_data| frame_data.to_frame(self.frame_width, self.frame_height))
                 .collect()
         } else {
@@ -120,13 +121,18 @@ impl AnimationConfig {
     }
 
     pub fn should_loop(&self, state: &AnimationState) -> bool {
-        self.animations.get(state)
+        self.animations
+            .get(state)
             .map(|data| data.loop_animation)
             .unwrap_or(true)
     }
 }
 
-pub fn determine_animation_state(velocity_x: i32, velocity_y: i32, _speed_threshold: i32) -> AnimationState {
+pub fn determine_animation_state(
+    velocity_x: i32,
+    velocity_y: i32,
+    _speed_threshold: i32,
+) -> AnimationState {
     let total_velocity = (velocity_x.abs() + velocity_y.abs()) as i32;
 
     if total_velocity == 0 {

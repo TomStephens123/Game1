@@ -1,5 +1,5 @@
 use sdl2::rect::Rect;
-use sdl2::render::{Texture, Canvas};
+use sdl2::render::{Canvas, Texture};
 use sdl2::video::Window;
 use std::time::{Duration, Instant};
 
@@ -54,7 +54,6 @@ impl<'a> SpriteSheet<'a> {
         self.last_frame_time = Instant::now();
     }
 
-
     pub fn reset(&mut self) {
         self.current_frame = 0;
         self.last_frame_time = Instant::now();
@@ -87,24 +86,29 @@ impl<'a> SpriteSheet<'a> {
         }
     }
 
-
-    pub fn render_flipped(&self, canvas: &mut Canvas<Window>, dest_rect: Rect, flip_horizontal: bool) -> Result<(), String> {
+    pub fn render_flipped(
+        &self,
+        canvas: &mut Canvas<Window>,
+        dest_rect: Rect,
+        flip_horizontal: bool,
+    ) -> Result<(), String> {
         if self.frames.is_empty() {
             return Err("No frames to render".to_string());
         }
 
         let src_rect = self.frames[self.current_frame].to_rect();
-        canvas.copy_ex(
-            self.texture,
-            Some(src_rect),
-            Some(dest_rect),
-            0.0,
-            None,
-            flip_horizontal,
-            false
-        ).map_err(|e| e.to_string())
+        canvas
+            .copy_ex(
+                self.texture,
+                Some(src_rect),
+                Some(dest_rect),
+                0.0,
+                None,
+                flip_horizontal,
+                false,
+            )
+            .map_err(|e| e.to_string())
     }
-
 
     pub fn is_finished(&self) -> bool {
         !self.loop_animation && !self.is_playing && self.current_frame == self.frames.len() - 1

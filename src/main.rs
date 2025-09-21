@@ -1,14 +1,21 @@
 use sdl2::event::Event;
-use sdl2::keyboard::Keycode;
 use sdl2::image::LoadTexture;
+use sdl2::keyboard::Keycode;
 
-mod sprite;
 mod animation;
 mod player;
+mod sprite;
 
-use sprite::SpriteSheet;
-use animation::{AnimationController, AnimationConfig, AnimationState};
+use animation::{AnimationConfig, AnimationController, AnimationState};
 use player::Player;
+use sprite::SpriteSheet;
+
+#[derive(Debug)]
+struct RedSquare {
+    x: i32,
+    y: i32,
+    size: u32,
+}
 
 // TODO: Multi-texture system for different animation states
 // Currently only loads IDLE sprite - need to expand this to support:
@@ -17,7 +24,16 @@ use player::Player;
 // - Resource management for efficient texture caching
 // - Dynamic switching between textures based on animation state
 
-fn load_sprite_textures(texture_creator: &sdl2::render::TextureCreator<sdl2::video::WindowContext>) -> Result<(sdl2::render::Texture<'_>, sdl2::render::Texture<'_>, sdl2::render::Texture<'_>), String> {
+fn load_sprite_textures(
+    texture_creator: &sdl2::render::TextureCreator<sdl2::video::WindowContext>,
+) -> Result<
+    (
+        sdl2::render::Texture<'_>,
+        sdl2::render::Texture<'_>,
+        sdl2::render::Texture<'_>,
+    ),
+    String,
+> {
     let idle_texture = texture_creator
         .load_texture("assets/sprites/player/IDLE.png")
         .map_err(|e| format!("Failed to load IDLE.png: {}", e))?;
@@ -68,15 +84,16 @@ fn main() -> Result<(), String> {
     let _image_context = sdl2::image::init(sdl2::image::InitFlag::PNG)?;
 
     let window = video_subsystem
-        .window("Game 1 - Real Sprite Demo (IDLE + RUN Animations)", 800, 600)
+        .window(
+            "Game 1 - Real Sprite Demo (IDLE + RUN Animations)",
+            800,
+            600,
+        )
         .position_centered()
         .build()
         .map_err(|e| e.to_string())?;
 
-    let mut canvas = window
-        .into_canvas()
-        .build()
-        .map_err(|e| e.to_string())?;
+    let mut canvas = window.into_canvas().build().map_err(|e| e.to_string())?;
 
     let texture_creator = canvas.texture_creator();
     let mut event_pump = sdl_context.event_pump()?;
@@ -89,13 +106,18 @@ fn main() -> Result<(), String> {
     let (idle_texture, run_texture, attack_texture) = load_sprite_textures(&texture_creator)?;
 
     // Setup player with animations (IDLE, RUN, and ATTACK)
-    let animation_controller = setup_player_animations(&idle_texture, &run_texture, &attack_texture, &config)?;
+    let animation_controller =
+        setup_player_animations(&idle_texture, &run_texture, &attack_texture, &config)?;
     let mut player = Player::new(375, 275, 96, 96, 3);
     player.set_animation_controller(animation_controller);
 
+    // Vector to store red squares spawned by mouse clicks
+    let mut red_squares: Vec<RedSquare> = Vec::new();
+
     println!("Controls:");
     println!("WASD - Move player");
-    println!("Mouse Click - Attack");
+    println!("M Key - Attack");
+    println!("Mouse Click - Spawn red square");
     println!("ESC - Exit");
     println!("\nDemo Features:");
     println!("- Real 16-bit sprite animations (IDLE + RUN + ATTACK)");
@@ -104,7 +126,7 @@ fn main() -> Result<(), String> {
     println!("- 7-frame ATTACK animation (60ms per frame, non-looping)");
     println!("- Tactical combat: No horizontal movement during attacks");
     println!("- Vertical movement allowed during attacks for positioning");
-    println!("- Mouse click attacks with priority over movement");
+    println!("- M key attacks with priority over movement");
     println!("- Sprite flipping for direction changes");
 
     'running: loop {
@@ -116,8 +138,14 @@ fn main() -> Result<(), String> {
                     keycode: Some(Keycode::Escape),
                     ..
                 } => break 'running,
-                Event::MouseButtonDown { .. } => {
+                Event::KeyDown {
+                    keycode: Some(Keycode::M),
+                    ..
+                } => {
                     player.start_attack();
+                }
+                Event::MouseButtonDown { x, y, .. } => {
+                    red_squares.push(RedSquare { x, y, size: 20 });
                 }
                 _ => {}
             }
@@ -135,12 +163,29 @@ fn main() -> Result<(), String> {
         // Render player
         player.render(&mut canvas)?;
 
+        // Render red squares
+        canvas.set_draw_color(sdl2::pixels::Color::RGB(255, 0, 0));
+        for square in &red_squares {
+            let rect = sdl2::rect::Rect::new(
+                square.x - (square.size as i32) / 2,
+                square.y - (square.size as i32) / 2,
+                square.size,
+                square.size,
+            );
+            canvas.fill_rect(rect)?;
+        }
+
         // Debug info (optional)
-        if false { // Set to true to see debug info
-            println!("Player: pos=({}, {}), vel=({}, {}), state={:?}",
-                player.position().0, player.position().1,
-                player.velocity().0, player.velocity().1,
-                player.current_animation_state());
+        if false {
+            // Set to true to see debug info
+            println!(
+                "Player: pos=({}, {}), vel=({}, {}), state={:?}",
+                player.position().0,
+                player.position().1,
+                player.velocity().0,
+                player.velocity().1,
+                player.current_animation_state()
+            );
         }
 
         canvas.present();
