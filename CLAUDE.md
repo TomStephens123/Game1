@@ -21,6 +21,7 @@
 ### Code Quality Standards
 - Use `cargo fmt` for consistent formatting
 - Run `cargo clippy` for linting and Rust best practices
+- When running the game always fix warnings as well as errors - unless they relate to a feature that is implemented but not extended yet (e.g. you've set up but not used one of the animation states yet)
 - Write tests for core game logic
 - Document complex algorithms and game mechanics
 

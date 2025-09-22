@@ -1,4 +1,4 @@
-use crate::animation::{AnimationController, AnimationState, determine_animation_state};
+use crate::animation::{AnimationController, AnimationState, Direction, determine_animation_state};
 use sdl2::keyboard::Scancode;
 use sdl2::rect::Rect;
 use sdl2::render::Canvas;
@@ -12,7 +12,7 @@ pub struct Player<'a> {
     pub speed: i32,
     pub velocity_x: i32,
     pub velocity_y: i32,
-    pub facing_left: bool,
+    pub direction: Direction,
     pub is_attacking: bool,
     animation_controller: AnimationController<'a>,
 }
@@ -27,7 +27,7 @@ impl<'a> Player<'a> {
             speed,
             velocity_x: 0,
             velocity_y: 0,
-            facing_left: false,
+            direction: Direction::South,
             is_attacking: false,
             animation_controller: AnimationController::new(),
         }
@@ -53,16 +53,27 @@ impl<'a> Player<'a> {
         if !self.is_attacking {
             if keyboard_state.is_scancode_pressed(Scancode::A) {
                 self.velocity_x -= self.speed;
-                self.facing_left = true;
             }
             if keyboard_state.is_scancode_pressed(Scancode::D) {
                 self.velocity_x += self.speed;
-                self.facing_left = false;
             }
+        }
+
+        // Normalize diagonal movement to maintain consistent speed
+        if self.velocity_x != 0 && self.velocity_y != 0 {
+            // For diagonal movement, scale by 1/√2 ≈ 0.707 to maintain same net speed
+            let diagonal_factor = 0.707; // 1.0 / sqrt(2.0)
+            self.velocity_x = (self.velocity_x as f32 * diagonal_factor).round() as i32;
+            self.velocity_y = (self.velocity_y as f32 * diagonal_factor).round() as i32;
         }
 
         self.x += self.velocity_x;
         self.y += self.velocity_y;
+
+        // Update direction based on movement (only when moving)
+        if self.velocity_x != 0 || self.velocity_y != 0 {
+            self.direction = Direction::from_velocity(self.velocity_x, self.velocity_y);
+        }
 
         // Check if attack animation is finished
         if self.is_attacking && self.animation_controller.is_animation_finished() {
@@ -83,25 +94,32 @@ impl<'a> Player<'a> {
     }
 
     pub fn keep_in_bounds(&mut self, window_width: u32, window_height: u32) {
+        let scale = 3; // Match rendering scale
+        let scaled_width = self.width * scale;
+        let scaled_height = self.height * scale;
+
         if self.x < 0 {
             self.x = 0;
         }
         if self.y < 0 {
             self.y = 0;
         }
-        if self.x > (window_width as i32) - (self.width as i32) {
-            self.x = (window_width as i32) - (self.width as i32);
+        if self.x > (window_width as i32) - (scaled_width as i32) {
+            self.x = (window_width as i32) - (scaled_width as i32);
         }
-        if self.y > (window_height as i32) - (self.height as i32) {
-            self.y = (window_height as i32) - (self.height as i32);
+        if self.y > (window_height as i32) - (scaled_height as i32) {
+            self.y = (window_height as i32) - (scaled_height as i32);
         }
     }
 
     pub fn render(&self, canvas: &mut Canvas<Window>) -> Result<(), String> {
-        let dest_rect = Rect::new(self.x, self.y, self.width, self.height);
+        let scale = 3; // 3x zoom scale
+        let scaled_width = self.width * scale;
+        let scaled_height = self.height * scale;
+        let dest_rect = Rect::new(self.x, self.y, scaled_width, scaled_height);
 
         if let Some(sprite_sheet) = self.animation_controller.get_current_sprite_sheet() {
-            sprite_sheet.render_flipped(canvas, dest_rect, self.facing_left)
+            sprite_sheet.render_directional(canvas, dest_rect, false, self.direction)
         } else {
             canvas.set_draw_color(sdl2::pixels::Color::RGB(255, 0, 0));
             canvas.fill_rect(dest_rect).map_err(|e| e.to_string())
@@ -111,6 +129,7 @@ impl<'a> Player<'a> {
     pub fn current_animation_state(&self) -> &AnimationState {
         self.animation_controller.current_state()
     }
+
 
     pub fn position(&self) -> (i32, i32) {
         (self.x, self.y)

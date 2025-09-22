@@ -1,3 +1,4 @@
+use crate::animation::{AnimationMode, Direction, PlayDirection};
 use sdl2::rect::Rect;
 use sdl2::render::{Canvas, Texture};
 use sdl2::video::Window;
@@ -23,9 +24,6 @@ impl Frame {
         }
     }
 
-    pub fn to_rect(&self) -> Rect {
-        Rect::new(self.x, self.y, self.width, self.height)
-    }
 }
 
 pub struct SpriteSheet<'a> {
@@ -35,6 +33,8 @@ pub struct SpriteSheet<'a> {
     last_frame_time: Instant,
     is_playing: bool,
     loop_animation: bool,
+    animation_mode: AnimationMode,
+    play_direction: PlayDirection,
 }
 
 impl<'a> SpriteSheet<'a> {
@@ -46,6 +46,8 @@ impl<'a> SpriteSheet<'a> {
             last_frame_time: Instant::now(),
             is_playing: true,
             loop_animation: true,
+            animation_mode: AnimationMode::Loop,
+            play_direction: PlayDirection::Forward,
         }
     }
 
@@ -56,11 +58,16 @@ impl<'a> SpriteSheet<'a> {
 
     pub fn reset(&mut self) {
         self.current_frame = 0;
+        self.play_direction = PlayDirection::Forward;
         self.last_frame_time = Instant::now();
     }
 
     pub fn set_loop(&mut self, should_loop: bool) {
         self.loop_animation = should_loop;
+    }
+
+    pub fn set_animation_mode(&mut self, mode: AnimationMode) {
+        self.animation_mode = mode;
     }
 
     pub fn update(&mut self) {
@@ -77,12 +84,52 @@ impl<'a> SpriteSheet<'a> {
     }
 
     fn advance_frame(&mut self) {
-        if self.current_frame + 1 < self.frames.len() {
-            self.current_frame += 1;
-        } else if self.loop_animation {
-            self.current_frame = 0;
-        } else {
-            self.is_playing = false;
+        match self.animation_mode {
+            AnimationMode::Loop => {
+                // Traditional looping behavior
+                if self.current_frame + 1 < self.frames.len() {
+                    self.current_frame += 1;
+                } else if self.loop_animation {
+                    self.current_frame = 0;
+                } else {
+                    self.is_playing = false;
+                }
+            }
+            AnimationMode::PingPong => {
+                // Ping-pong behavior: 1-2-3-2-1-2-3-2-1...
+                match self.play_direction {
+                    PlayDirection::Forward => {
+                        if self.current_frame + 1 < self.frames.len() {
+                            self.current_frame += 1;
+                        } else {
+                            // Reached the end, switch to backward
+                            self.play_direction = PlayDirection::Backward;
+                            if self.frames.len() > 1 {
+                                self.current_frame -= 1; // Go to second-to-last frame
+                            }
+                        }
+                    }
+                    PlayDirection::Backward => {
+                        if self.current_frame > 0 {
+                            self.current_frame -= 1;
+                        } else {
+                            // Reached the beginning, switch to forward
+                            self.play_direction = PlayDirection::Forward;
+                            if self.frames.len() > 1 {
+                                self.current_frame = 1; // Go to second frame
+                            }
+                        }
+                    }
+                }
+            }
+            AnimationMode::Once => {
+                // Play once and stop
+                if self.current_frame + 1 < self.frames.len() {
+                    self.current_frame += 1;
+                } else {
+                    self.is_playing = false;
+                }
+            }
         }
     }
 
@@ -92,11 +139,33 @@ impl<'a> SpriteSheet<'a> {
         dest_rect: Rect,
         flip_horizontal: bool,
     ) -> Result<(), String> {
+        self.render_directional(canvas, dest_rect, flip_horizontal, Direction::South)
+    }
+
+    pub fn render_directional(
+        &self,
+        canvas: &mut Canvas<Window>,
+        dest_rect: Rect,
+        flip_horizontal: bool,
+        direction: Direction,
+    ) -> Result<(), String> {
         if self.frames.is_empty() {
             return Err("No frames to render".to_string());
         }
 
-        let src_rect = self.frames[self.current_frame].to_rect();
+        // Calculate the source rectangle based on current frame and direction
+        let base_frame = &self.frames[self.current_frame];
+        let direction_row = direction.to_row();
+        let frame_height = base_frame.height;
+
+        // Adjust y coordinate based on direction (row in sprite sheet)
+        let src_rect = Rect::new(
+            base_frame.x,
+            base_frame.y + (direction_row * frame_height as i32),
+            base_frame.width,
+            base_frame.height,
+        );
+
         canvas
             .copy_ex(
                 self.texture,

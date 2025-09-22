@@ -2,11 +2,73 @@ use crate::sprite::{Frame, SpriteSheet};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AnimationMode {
+    #[serde(rename = "loop")]
+    Loop,
+    #[serde(rename = "ping_pong")]
+    PingPong,
+    #[serde(rename = "once")]
+    Once,
+}
+
+impl Default for AnimationMode {
+    fn default() -> Self {
+        AnimationMode::Loop
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PlayDirection {
+    Forward,
+    Backward,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AnimationState {
     Idle,
     Running,
     Attack,
+    Jump,
+    SlimeIdle,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    South = 0,
+    SouthEast = 1,
+    East = 2,
+    NorthEast = 3,
+    North = 4,
+    NorthWest = 5,
+    West = 6,
+    SouthWest = 7,
+}
+
+impl Direction {
+    pub fn from_velocity(vel_x: i32, vel_y: i32) -> Self {
+        if vel_x == 0 && vel_y == 0 {
+            return Direction::South; // Default direction when not moving
+        }
+
+        // Normalize velocity to determine direction
+        // SDL2 coordinate system: positive Y is down
+        match (vel_x.signum(), vel_y.signum()) {
+            (0, 1) => Direction::South,       // Down
+            (1, 1) => Direction::SouthEast,   // Down-Right
+            (1, 0) => Direction::East,        // Right
+            (1, -1) => Direction::NorthEast,  // Up-Right
+            (0, -1) => Direction::North,      // Up
+            (-1, -1) => Direction::NorthWest, // Up-Left
+            (-1, 0) => Direction::West,       // Left
+            (-1, 1) => Direction::SouthWest,  // Down-Left
+            _ => Direction::South,            // Fallback
+        }
+    }
+
+    pub fn to_row(&self) -> i32 {
+        *self as i32
+    }
 }
 
 impl Default for AnimationState {
@@ -25,7 +87,11 @@ pub struct AnimationConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnimationData {
     pub frames: Vec<FrameData>,
-    pub loop_animation: bool,
+    #[serde(default)]
+    pub animation_mode: AnimationMode,
+    // Keep for backward compatibility, but prefer animation_mode
+    #[serde(default)]
+    pub loop_animation: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -121,10 +187,37 @@ impl AnimationConfig {
     }
 
     pub fn should_loop(&self, state: &AnimationState) -> bool {
+        if let Some(animation_data) = self.animations.get(state) {
+            // Check if we have legacy loop_animation setting first for backward compatibility
+            if let Some(legacy_loop) = animation_data.loop_animation {
+                return legacy_loop;
+            }
+            // Otherwise use the new animation_mode
+            match animation_data.animation_mode {
+                AnimationMode::Loop | AnimationMode::PingPong => true,
+                AnimationMode::Once => false,
+            }
+        } else {
+            true // Default to looping
+        }
+    }
+
+    pub fn get_animation_mode(&self, state: &AnimationState) -> AnimationMode {
         self.animations
             .get(state)
-            .map(|data| data.loop_animation)
-            .unwrap_or(true)
+            .map(|data| {
+                // Handle backward compatibility
+                if let Some(legacy_loop) = data.loop_animation {
+                    if legacy_loop {
+                        AnimationMode::Loop
+                    } else {
+                        AnimationMode::Once
+                    }
+                } else {
+                    data.animation_mode.clone()
+                }
+            })
+            .unwrap_or(AnimationMode::Loop)
     }
 }
 
