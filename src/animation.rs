@@ -3,8 +3,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum AnimationMode {
     #[serde(rename = "loop")]
+    #[default]
     Loop,
     #[serde(rename = "ping_pong")]
     PingPong,
@@ -12,11 +14,6 @@ pub enum AnimationMode {
     Once,
 }
 
-impl Default for AnimationMode {
-    fn default() -> Self {
-        AnimationMode::Loop
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlayDirection {
@@ -457,7 +454,7 @@ pub fn determine_animation_state(
     velocity_y: i32,
     _speed_threshold: i32,
 ) -> AnimationState {
-    let total_velocity = (velocity_x.abs() + velocity_y.abs()) as i32;
+    let total_velocity = velocity_x.abs() + velocity_y.abs();
 
     if total_velocity == 0 {
         "idle".to_string()

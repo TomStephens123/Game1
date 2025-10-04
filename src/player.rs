@@ -1,8 +1,10 @@
 use crate::animation::{AnimationController, AnimationState, Direction, determine_animation_state};
+use crate::collision::{Collidable, CollisionLayer};
 use sdl2::keyboard::Scancode;
 use sdl2::rect::Rect;
 use sdl2::render::Canvas;
 use sdl2::video::Window;
+use std::time::Instant;
 
 pub struct Player<'a> {
     pub x: i32,
@@ -15,6 +17,20 @@ pub struct Player<'a> {
     pub direction: Direction,
     pub is_attacking: bool,
     animation_controller: AnimationController<'a>,
+
+    // Health and damage system
+    pub health: i32,
+    pub max_health: i32,
+    pub is_invulnerable: bool,
+    invulnerability_timer: Instant,
+    invulnerability_duration: f32, // seconds
+
+    // Collision hitbox configuration
+    // Allows tuning the collision box independently from sprite rendering
+    pub hitbox_offset_x: i32,
+    pub hitbox_offset_y: i32,
+    pub hitbox_width: u32,
+    pub hitbox_height: u32,
 }
 
 impl<'a> Player<'a> {
@@ -30,6 +46,17 @@ impl<'a> Player<'a> {
             direction: Direction::South,
             is_attacking: false,
             animation_controller: AnimationController::new(),
+            health: 10,
+            max_health: 10,
+            is_invulnerable: false,
+            invulnerability_timer: Instant::now(),
+            invulnerability_duration: 1.0, // 1 second of invulnerability after taking damage
+
+            // Default hitbox tuned to match actual sprite artwork
+            hitbox_offset_x: 8,  // 8 pixels from left edge (centered)
+            hitbox_offset_y: 8,  // 8 pixels from top edge
+            hitbox_width: 16,    // 16x16 square hitbox
+            hitbox_height: 16,
         }
     }
 
@@ -78,6 +105,14 @@ impl<'a> Player<'a> {
         // Check if attack animation is finished
         if self.is_attacking && self.animation_controller.is_animation_finished() {
             self.is_attacking = false;
+        }
+
+        // Update invulnerability timer
+        if self.is_invulnerable {
+            let elapsed = self.invulnerability_timer.elapsed().as_secs_f32();
+            if elapsed >= self.invulnerability_duration {
+                self.is_invulnerable = false;
+            }
         }
 
         // Determine animation state based on current actions
@@ -145,5 +180,88 @@ impl<'a> Player<'a> {
         if !self.is_attacking {
             self.is_attacking = true;
         }
+    }
+
+    /// Applies a push force to the player (used for collision response).
+    ///
+    /// This is called when the player collides with something and needs to be
+    /// pushed away to prevent overlap.
+    pub fn apply_push(&mut self, push_x: i32, push_y: i32) {
+        self.x += push_x;
+        self.y += push_y;
+    }
+
+    /// Deals damage to the player if not invulnerable.
+    ///
+    /// Returns true if damage was taken, false if player was invulnerable.
+    pub fn take_damage(&mut self, damage: i32) -> bool {
+        if self.is_invulnerable {
+            return false;
+        }
+
+        self.health -= damage;
+        self.is_invulnerable = true;
+        self.invulnerability_timer = Instant::now();
+
+        println!("Player took {} damage! Health: {}/{}", damage, self.health, self.max_health);
+
+        if self.health <= 0 {
+            println!("Player died!");
+        }
+
+        true
+    }
+
+    /// Returns true if the player is alive.
+    ///
+    /// Note: Currently unused but included for future game over detection.
+    #[allow(dead_code)]
+    pub fn is_alive(&self) -> bool {
+        self.health > 0
+    }
+
+    /// Sets custom hitbox parameters for fine-tuning collision detection.
+    ///
+    /// Use this to adjust the collision box to match the actual sprite artwork.
+    /// All values are in unscaled sprite pixels (will be multiplied by scale factor).
+    ///
+    /// # Parameters
+    /// - `offset_x`: Horizontal offset from sprite position
+    /// - `offset_y`: Vertical offset from sprite position
+    /// - `width`: Width of the hitbox (before scaling)
+    /// - `height`: Height of the hitbox (before scaling)
+    #[allow(dead_code)]
+    pub fn set_hitbox(&mut self, offset_x: i32, offset_y: i32, width: u32, height: u32) {
+        self.hitbox_offset_x = offset_x;
+        self.hitbox_offset_y = offset_y;
+        self.hitbox_width = width;
+        self.hitbox_height = height;
+    }
+}
+
+// Collision System Implementation
+//
+// This trait implementation makes Player participate in the collision system.
+// The collision bounds match the player's rendered size (accounting for 3x scale).
+impl<'a> Collidable for Player<'a> {
+    fn get_bounds(&self) -> Rect {
+        // Use configurable hitbox instead of full sprite size
+        // This allows fine-tuning collision to match actual sprite artwork
+        let scale = 3;
+        let offset_x = self.hitbox_offset_x * scale as i32;
+        let offset_y = self.hitbox_offset_y * scale as i32;
+        let scaled_width = self.hitbox_width * scale;
+        let scaled_height = self.hitbox_height * scale;
+
+        Rect::new(
+            self.x + offset_x,
+            self.y + offset_y,
+            scaled_width,
+            scaled_height,
+        )
+    }
+
+    fn get_collision_layer(&self) -> CollisionLayer {
+        CollisionLayer::Player
     }
 }
