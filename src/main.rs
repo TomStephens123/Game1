@@ -7,10 +7,9 @@ mod player;
 mod slime;
 mod sprite;
 
-use animation::{AnimationConfig, AnimationController, AnimationState};
+use animation::AnimationConfig;
 use player::Player;
 use slime::Slime;
-use sprite::SpriteSheet;
 
 
 fn load_character_texture(
@@ -37,58 +36,17 @@ fn load_background_texture(
         .map_err(|e| format!("Failed to load background_meadow.png: {}", e))
 }
 
-fn setup_player_animations<'a>(
-    character_texture: &'a sdl2::render::Texture<'a>,
-    config: &AnimationConfig,
-) -> Result<AnimationController<'a>, String> {
-    let mut controller = AnimationController::new();
-
-    // Create IDLE animation using Character-Base texture
-    let idle_frames = config.create_frames(&AnimationState::Idle);
-    let mut idle_sprite_sheet = SpriteSheet::new(character_texture, idle_frames);
-    idle_sprite_sheet.set_loop(config.should_loop(&AnimationState::Idle));
-    idle_sprite_sheet.set_animation_mode(config.get_animation_mode(&AnimationState::Idle));
-    controller.add_animation(AnimationState::Idle, idle_sprite_sheet);
-
-    // Create RUNNING animation using Character-Base texture
-    let run_frames = config.create_frames(&AnimationState::Running);
-    let mut run_sprite_sheet = SpriteSheet::new(character_texture, run_frames);
-    run_sprite_sheet.set_loop(config.should_loop(&AnimationState::Running));
-    run_sprite_sheet.set_animation_mode(config.get_animation_mode(&AnimationState::Running));
-    controller.add_animation(AnimationState::Running, run_sprite_sheet);
-
-    // Create ATTACK animation using Character-Base texture
-    let attack_frames = config.create_frames(&AnimationState::Attack);
-    let mut attack_sprite_sheet = SpriteSheet::new(character_texture, attack_frames);
-    attack_sprite_sheet.set_loop(config.should_loop(&AnimationState::Attack));
-    attack_sprite_sheet.set_animation_mode(config.get_animation_mode(&AnimationState::Attack));
-    controller.add_animation(AnimationState::Attack, attack_sprite_sheet);
-
-    Ok(controller)
-}
-
-fn create_slime_animation_controller<'a>(
-    slime_texture: &'a sdl2::render::Texture<'a>,
-    config: &AnimationConfig,
-) -> Result<AnimationController<'a>, String> {
-    let mut controller = AnimationController::new();
-
-    // Create SlimeIdle animation
-    let idle_frames = config.create_frames(&AnimationState::SlimeIdle);
-    let mut idle_sprite_sheet = SpriteSheet::new(slime_texture, idle_frames);
-    idle_sprite_sheet.set_loop(config.should_loop(&AnimationState::SlimeIdle));
-    idle_sprite_sheet.set_animation_mode(config.get_animation_mode(&AnimationState::SlimeIdle));
-    controller.add_animation(AnimationState::SlimeIdle, idle_sprite_sheet);
-
-    // Create Jump animation
-    let jump_frames = config.create_frames(&AnimationState::Jump);
-    let mut jump_sprite_sheet = SpriteSheet::new(slime_texture, jump_frames);
-    jump_sprite_sheet.set_loop(config.should_loop(&AnimationState::Jump));
-    jump_sprite_sheet.set_animation_mode(config.get_animation_mode(&AnimationState::Jump));
-    controller.add_animation(AnimationState::Jump, jump_sprite_sheet);
-
-    Ok(controller)
-}
+// REMOVED: Old repetitive setup functions replaced with AnimationConfig::create_controller()!
+//
+// Game Dev Pattern: Don't Repeat Yourself (DRY)
+// The old code had 50+ lines of boilerplate that's now replaced by single-line calls:
+//   config.create_controller(texture, &["idle", "running", "attack"])?
+//
+// Benefits:
+// - Less code = fewer bugs
+// - Easier to add new entities (no new function needed)
+// - Configuration-driven (JSON defines what exists)
+// - Factory pattern encapsulates complexity
 
 fn main() -> Result<(), String> {
     let sdl_context = sdl2::init()?;
@@ -112,14 +70,23 @@ fn main() -> Result<(), String> {
     let slime_config = AnimationConfig::load_from_file("assets/config/slime_animations.json")
         .map_err(|e| format!("Failed to load slime animation config: {}", e))?;
 
+    // Validation: Print available animations (helpful during development)
+    println!("\n=== Animation System Loaded ===");
+    println!("Player animations: {:?}", player_config.available_states());
+    println!("Slime animations: {:?}", slime_config.available_states());
+
     // Load sprite textures
     let character_texture = load_character_texture(&texture_creator)?;
     let slime_texture = load_slime_texture(&texture_creator)?;
     let background_texture = load_background_texture(&texture_creator)?;
 
-    // Setup player with animations (RUNNING and ATTACK)
-    let animation_controller = setup_player_animations(&character_texture, &player_config)?;
-    let mut player = Player::new(300, 200, 32, 32, 3); // Adjusted position for larger sprites
+    // Setup player with animations using new factory function
+    // Game Dev Pattern: This single line replaces 27 lines of boilerplate!
+    let animation_controller = player_config.create_controller(
+        &character_texture,
+        &["idle", "running", "attack"],
+    )?;
+    let mut player = Player::new(300, 200, 32, 32, 3);
     player.set_animation_controller(animation_controller);
 
     // Vector to store slimes spawned by mouse clicks
@@ -160,7 +127,12 @@ fn main() -> Result<(), String> {
                     player.start_attack();
                 }
                 Event::MouseButtonDown { x, y, .. } => {
-                    let slime_animation_controller = create_slime_animation_controller(&slime_texture, &slime_config)?;
+                    // Spawn a new slime at mouse position
+                    // Using factory method - clean and simple!
+                    let slime_animation_controller = slime_config.create_controller(
+                        &slime_texture,
+                        &["slime_idle", "jump"],
+                    )?;
                     slimes.push(Slime::new(x - 48, y - 48, slime_animation_controller)); // Center larger slime on click (32*3/2 = 48)
                 }
                 _ => {}

@@ -81,8 +81,10 @@ impl<'a> Player<'a> {
         }
 
         // Determine animation state based on current actions
+        // Game Dev Pattern: Priority-based state selection
+        // Attack takes priority over movement states
         let new_state = if self.is_attacking {
-            AnimationState::Attack
+            "attack".to_string()
         } else {
             // Only consider horizontal movement for running animation
             // Vertical movement during attacks shouldn't trigger running animation

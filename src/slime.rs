@@ -1,4 +1,4 @@
-use crate::animation::{AnimationController, AnimationState};
+use crate::animation::AnimationController;
 use sdl2::rect::Rect;
 use sdl2::render::Canvas;
 use sdl2::video::Window;
@@ -42,17 +42,19 @@ impl<'a> Slime<'a> {
     pub fn update(&mut self) {
         let elapsed_time = self.behavior_timer.elapsed().as_secs_f32();
 
+        // Game Dev Pattern: Simple AI State Machine
+        // The slime alternates between idle and jumping based on timers
         match self.behavior {
             SlimeBehavior::Idle => {
                 // Idle for 2 seconds, then switch to jumping
                 if elapsed_time >= 2.0 {
                     self.behavior = SlimeBehavior::Jumping;
                     self.behavior_timer = Instant::now();
-                    self.animation_controller.set_state(AnimationState::Jump);
+                    self.animation_controller.set_state("jump".to_string());
                 } else {
                     // Make sure we're in idle animation
-                    if self.animation_controller.current_state() != &AnimationState::SlimeIdle {
-                        self.animation_controller.set_state(AnimationState::SlimeIdle);
+                    if self.animation_controller.current_state() != "slime_idle" {
+                        self.animation_controller.set_state("slime_idle".to_string());
                     }
                 }
                 // Stay at base position when idle
@@ -63,10 +65,11 @@ impl<'a> Slime<'a> {
                 if elapsed_time >= self.jump_duration {
                     self.behavior = SlimeBehavior::Idle;
                     self.behavior_timer = Instant::now();
-                    self.animation_controller.set_state(AnimationState::SlimeIdle);
+                    self.animation_controller.set_state("slime_idle".to_string());
                     self.y = self.base_y; // Return to ground
                 } else {
                     // Calculate jump position using sine wave
+                    // Game Dev Math: sin() gives smooth bounce motion (0 -> 1 -> 0)
                     let jump_progress = (elapsed_time * std::f32::consts::PI / self.jump_duration).sin();
                     let jump_offset = (jump_progress * self.jump_height as f32) as i32;
                     self.y = self.base_y - jump_offset;

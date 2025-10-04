@@ -2,27 +2,27 @@
   "frame_width": 32,
   "frame_height": 32,
   "animations": {
-    "Idle": {
+    "idle": {
       "frames": [
         { "x": 0, "y": 0, "duration_ms": 300 },
         { "x": 32, "y": 0, "duration_ms": 300 }
       ],
-      "loop_animation": true
+      "animation_mode": "loop"
     },
-    "Running": {
+    "running": {
       "frames": [
         { "x": 64, "y": 0, "duration_ms": 150 },
         { "x": 96, "y": 0, "duration_ms": 150 }
       ],
-      "loop_animation": true
+      "animation_mode": "loop"
     },
-    "Attack": {
+    "attack": {
       "frames": [
         { "x": 512, "y": 0, "duration_ms": 100 },
         { "x": 544, "y": 0, "duration_ms": 100 },
         { "x": 576, "y": 0, "duration_ms": 100 }
       ],
-      "loop_animation": false
+      "animation_mode": "once"
     }
   }
 }
