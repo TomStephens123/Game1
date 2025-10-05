@@ -6,6 +6,12 @@
 
 ## Development Guidelines
 
+## Key things to note
+- Place all documentation in docs/
+- Document key architectural decisions and their Rust-specific reasoning as the project develops.
+- Refer to documentation if work relates to higher level architecture decisions
+- ignore tmp files unless instructed to most will be junk stuff
+
 ### Rust Learning Focus
 - Prioritize idiomatic Rust patterns over quick solutions
 - Explain ownership, borrowing, and lifetime concepts as they arise
@@ -40,7 +46,3 @@ Track Rust concepts learned through this project:
 - [ ] Concurrency and async programming
 - [ ] Game-specific patterns (ECS, state machines)
 
-## Documentation
-- Place all documentation in docs/
-- Document key architectural decisions and their Rust-specific reasoning as the project develops.
-- Refer to documentation if work relates to higher level architecture decisions

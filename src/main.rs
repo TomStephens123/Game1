@@ -10,6 +10,7 @@ mod player;
 mod slime;
 mod sprite;
 mod stats;
+mod tile;
 
 use animation::AnimationConfig;
 use attack_effect::AttackEffect;
@@ -20,6 +21,7 @@ use collision::{
 use combat::{DamageEvent, DamageSource};
 use player::Player;
 use slime::Slime;
+use tile::{TileId, TileRegistry, TileType, WorldGrid, RenderGrid};
 
 // Game resolution constants
 const GAME_WIDTH: u32 = 640;
@@ -49,6 +51,14 @@ fn load_background_texture(
     texture_creator
         .load_texture("assets/backgrounds/background_meadow.png")
         .map_err(|e| format!("Failed to load background_meadow.png: {}", e))
+}
+
+fn load_grass_tile_texture(
+    texture_creator: &sdl2::render::TextureCreator<sdl2::video::WindowContext>,
+) -> Result<sdl2::render::Texture<'_>, String> {
+    texture_creator
+        .load_texture("assets/backgrounds/tileable/grass_tile.png")
+        .map_err(|e| format!("Failed to load grass_tile.png: {}", e))
 }
 
 fn load_punch_texture(
@@ -135,8 +145,9 @@ fn main() -> Result<(), String> {
     // Load sprite textures
     let character_texture = load_character_texture(&texture_creator)?;
     let slime_texture = load_slime_texture(&texture_creator)?;
-    let background_texture = load_background_texture(&texture_creator)?;
+    let _background_texture = load_background_texture(&texture_creator)?;
     let punch_texture = load_punch_texture(&texture_creator)?;
+    let grass_tile_texture = load_grass_tile_texture(&texture_creator)?;
 
     // Setup player with animations using new factory function
     // Game Dev Pattern: This single line replaces 27 lines of boilerplate!
@@ -150,6 +161,31 @@ fn main() -> Result<(), String> {
     // Hitbox is already tuned to sprite artwork (16x16 centered)
     // Use player.set_hitbox() to adjust if needed, or press 'B' to visualize
 
+    // Setup tile system
+    // Create and register tile types
+    let mut _tile_registry = TileRegistry::new();
+    _tile_registry.register(TileType {
+        id: TileId::Grass,
+        name: "Grass".to_string(),
+        tile_size: 32,
+    });
+    _tile_registry.register(TileType {
+        id: TileId::Dirt,
+        name: "Dirt".to_string(),
+        tile_size: 32,
+    });
+
+    // Create world grid (40x24 tiles, default to grass)
+    let mut world_grid = WorldGrid::new(40, 24, TileId::Grass);
+
+    // Create render grid based on world grid
+    let mut render_grid = RenderGrid::new(&world_grid);
+
+    // Tile placement state
+    let mut selected_tile = TileId::Grass;
+    let mut is_painting = false; // Track if mouse button is held down
+    let mut last_painted_tile: Option<(i32, i32)> = None; // Prevent painting same tile multiple times
+
     // Vector to store slimes spawned by mouse clicks
     let mut slimes: Vec<Slime> = Vec::new();
 
@@ -161,6 +197,9 @@ fn main() -> Result<(), String> {
 
     // Debug toggle for collision visualization
     let mut show_collision_boxes = false;
+
+    // Debug toggle for tile grid visualization
+    let mut show_tile_grid = false;
 
     // Create static world objects (obstacles)
     // These are immovable objects the player cannot pass through
@@ -182,17 +221,20 @@ fn main() -> Result<(), String> {
     println!("WASD - Move player");
     println!("M Key - Attack");
     println!("B Key - Toggle collision debug boxes");
-    println!("Mouse Click - Spawn slime");
+    println!("G Key - Toggle tile grid debug view");
+    println!("1 Key - Select Grass tile");
+    println!("2 Key - Select Dirt tile");
+    println!("Left Click - Place selected tile");
+    println!("Right Click - Spawn slime");
     println!("ESC - Exit");
-    println!("\nDemo Features:");
-    println!("- Click to spawn slimes at cursor position");
-    println!("- Press M to attack");
-    println!("\n=== NEW: Collision System ===");
+    println!("\n=== NEW: Tile Placement System ===");
+    println!("- Select tiles with 1 (Grass) or 2 (Dirt)");
+    println!("- Left click to place tiles in the world");
+    println!("- Right click to spawn slimes for testing");
+    println!("\n=== Collision System ===");
     println!("- Push-apart physics prevents overlap");
     println!("- Touching slimes without attacking damages player (10 HP total)");
     println!("- 1 second invulnerability after taking damage");
-    println!("- Static world objects (gray rectangles are solid walls)");
-    println!("- Border walls and central obstacle block movement");
 
     'running: loop {
         // Handle events
@@ -253,7 +295,58 @@ fn main() -> Result<(), String> {
                     show_collision_boxes = !show_collision_boxes;
                     println!("Collision boxes: {}", if show_collision_boxes { "ON" } else { "OFF" });
                 }
-                Event::MouseButtonDown { x, y, .. } => {
+                Event::KeyDown {
+                    keycode: Some(Keycode::G),
+                    ..
+                } => {
+                    show_tile_grid = !show_tile_grid;
+                    println!("Tile grid debug: {}", if show_tile_grid { "ON" } else { "OFF" });
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::Num1),
+                    ..
+                } => {
+                    selected_tile = TileId::Grass;
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::Num2),
+                    ..
+                } => {
+                    selected_tile = TileId::Dirt;
+                }
+                Event::MouseButtonDown { mouse_btn: sdl2::mouse::MouseButton::Left, x, y, .. } => {
+                    // Left click: Start painting
+                    is_painting = true;
+                    let tile_x = x / 32;
+                    let tile_y = y / 32;
+
+                    // Place initial tile
+                    if world_grid.set_tile(tile_x, tile_y, selected_tile) {
+                        render_grid.update_tile_and_neighbors(&world_grid, tile_x, tile_y);
+                        last_painted_tile = Some((tile_x, tile_y));
+                    }
+                }
+                Event::MouseButtonUp { mouse_btn: sdl2::mouse::MouseButton::Left, .. } => {
+                    // Release left mouse: Stop painting
+                    is_painting = false;
+                    last_painted_tile = None;
+                }
+                Event::MouseMotion { x, y, .. } => {
+                    // Handle painting while dragging
+                    if is_painting {
+                        let tile_x = x / 32;
+                        let tile_y = y / 32;
+
+                        // Only paint if we've moved to a different tile
+                        if last_painted_tile != Some((tile_x, tile_y)) {
+                            if world_grid.set_tile(tile_x, tile_y, selected_tile) {
+                                render_grid.update_tile_and_neighbors(&world_grid, tile_x, tile_y);
+                                last_painted_tile = Some((tile_x, tile_y));
+                            }
+                        }
+                    }
+                }
+                Event::MouseButtonDown { mouse_btn: sdl2::mouse::MouseButton::Right, x, y, .. } => {
                     // Spawn a new slime at mouse position
                     // Using factory method - clean and simple!
                     let slime_animation_controller = slime_config.create_controller(
@@ -363,23 +456,28 @@ fn main() -> Result<(), String> {
             }
         }
 
-        // Clear screen
+        // Clear screen with black background
+        canvas.set_draw_color(sdl2::pixels::Color::RGB(0, 0, 0));
         canvas.clear();
 
-        // Render background
-        canvas.copy(&background_texture, None, None)?;
+        // Render background (old static background - can remove later)
+        // canvas.copy(&background_texture, None, None)?;
+
+        // Render tile world
+        render_grid.render(&mut canvas, &grass_tile_texture)?;
 
         // Render static objects (simple gray rectangles for now)
-        canvas.set_draw_color(sdl2::pixels::Color::RGB(100, 100, 100));
-        for static_obj in &static_objects {
-            let rect = sdl2::rect::Rect::new(
-                static_obj.x,
-                static_obj.y,
-                static_obj.width,
-                static_obj.height,
-            );
-            canvas.fill_rect(rect).map_err(|e| e.to_string())?;
-        }
+        // Temporarily commented out to see tiles
+        // canvas.set_draw_color(sdl2::pixels::Color::RGB(100, 100, 100));
+        // for static_obj in &static_objects {
+        //     let rect = sdl2::rect::Rect::new(
+        //         static_obj.x,
+        //         static_obj.y,
+        //         static_obj.width,
+        //         static_obj.height,
+        //     );
+        //     canvas.fill_rect(rect).map_err(|e| e.to_string())?;
+        // }
 
         // Render player
         player.render(&mut canvas)?;
@@ -413,6 +511,46 @@ fn main() -> Result<(), String> {
                 canvas.set_draw_color(sdl2::pixels::Color::RGBA(0, 255, 0, 128));
                 let attack_hitbox = attack.get_hitbox();
                 canvas.draw_rect(attack_hitbox).map_err(|e| e.to_string())?;
+            }
+        }
+
+        // Debug: Render tile grid (toggle with 'G' key)
+        if show_tile_grid {
+            // Draw world grid lines (YELLOW)
+            canvas.set_draw_color(sdl2::pixels::Color::RGBA(255, 255, 0, 128));
+            for x in 0..=world_grid.width {
+                let line_x = (x * 32) as i32;
+                canvas.draw_line(
+                    sdl2::rect::Point::new(line_x, 0),
+                    sdl2::rect::Point::new(line_x, GAME_HEIGHT as i32)
+                ).map_err(|e| e.to_string())?;
+            }
+            for y in 0..=world_grid.height {
+                let line_y = (y * 32) as i32;
+                canvas.draw_line(
+                    sdl2::rect::Point::new(0, line_y),
+                    sdl2::rect::Point::new(GAME_WIDTH as i32, line_y)
+                ).map_err(|e| e.to_string())?;
+            }
+
+            // Draw world tile type indicators (GREEN for grass, BROWN for dirt)
+            for y in 0..world_grid.height {
+                for x in 0..world_grid.width {
+                    if let Some(tile_id) = world_grid.get_tile(x as i32, y as i32) {
+                        let color = match tile_id {
+                            TileId::Grass => sdl2::pixels::Color::RGB(0, 255, 0),
+                            TileId::Dirt => sdl2::pixels::Color::RGB(139, 69, 19),
+                        };
+                        canvas.set_draw_color(color);
+                        let indicator_rect = sdl2::rect::Rect::new(
+                            (x * 32 + 12) as i32,
+                            (y * 32 + 12) as i32,
+                            8,
+                            8
+                        );
+                        canvas.fill_rect(indicator_rect).map_err(|e| e.to_string())?;
+                    }
+                }
             }
         }
 
