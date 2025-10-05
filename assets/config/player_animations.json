@@ -23,6 +23,22 @@
         { "x": 576, "y": 0, "duration_ms": 100 }
       ],
       "animation_mode": "once"
+    },
+    "damage": {
+      "frames": [
+        { "x": 576, "y": 0, "duration_ms": 150 },
+        { "x": 608, "y": 0, "duration_ms": 150 }
+      ],
+      "animation_mode": "once"
+    },
+    "death": {
+      "frames": [
+        { "x": 640, "y": 0, "duration_ms": 200 },
+        { "x": 672, "y": 0, "duration_ms": 200 },
+        { "x": 704, "y": 0, "duration_ms": 200 },
+        { "x": 736, "y": 0, "duration_ms": 200 }
+      ],
+      "animation_mode": "once"
     }
   }
 }

@@ -19,6 +19,7 @@ pub struct Player<'a> {
     pub velocity_y: i32,
     pub direction: Direction,
     pub is_attacking: bool,
+    pub is_taking_damage: bool,  // Track if damage animation is playing
     animation_controller: AnimationController<'a>,
 
     // New comprehensive stats system
@@ -58,6 +59,7 @@ impl<'a> Player<'a> {
             velocity_y: 0,
             direction: Direction::South,
             is_attacking: false,
+            is_taking_damage: false,  // Not taking damage initially
             animation_controller: AnimationController::new(),
             stats,
             state: PlayerState::Alive,
@@ -85,8 +87,8 @@ impl<'a> Player<'a> {
         // Get effective movement speed from stats (will support modifiers later)
         let effective_speed = self.stats.movement_speed as i32;
 
-        // Only allow movement if not attacking
-        if !self.is_attacking {
+        // Only allow movement if not attacking or taking damage
+        if !self.is_attacking && !self.is_taking_damage {
             // Vertical movement
             if keyboard_state.is_scancode_pressed(Scancode::W) {
                 self.velocity_y -= effective_speed;
@@ -125,6 +127,11 @@ impl<'a> Player<'a> {
             self.is_attacking = false;
         }
 
+        // Check if damage animation is finished
+        if self.is_taking_damage && self.animation_controller.is_animation_finished() {
+            self.is_taking_damage = false;
+        }
+
         // Update invulnerability timer
         if self.is_invulnerable {
             let elapsed = self.invulnerability_timer.elapsed().as_secs_f32();
@@ -135,8 +142,12 @@ impl<'a> Player<'a> {
 
         // Determine animation state based on current actions
         // Game Dev Pattern: Priority-based state selection
-        // Attack takes priority over movement states
-        let new_state = if self.is_attacking {
+        // Death > Damage > Attack > Movement > Idle
+        let new_state = if !self.state.is_alive() {
+            "death".to_string()
+        } else if self.is_taking_damage {
+            "damage".to_string()
+        } else if self.is_attacking {
             "attack".to_string()
         } else {
             // Only consider horizontal movement for running animation
@@ -148,29 +159,10 @@ impl<'a> Player<'a> {
         self.animation_controller.update();
     }
 
-    pub fn keep_in_bounds(&mut self, window_width: u32, window_height: u32) {
-        let scale = 2; // Match rendering scale
-        let scaled_width = self.width * scale;
-        let scaled_height = self.height * scale;
-
-        if self.x < 0 {
-            self.x = 0;
-        }
-        if self.y < 0 {
-            self.y = 0;
-        }
-        if self.x > (window_width as i32) - (scaled_width as i32) {
-            self.x = (window_width as i32) - (scaled_width as i32);
-        }
-        if self.y > (window_height as i32) - (scaled_height as i32) {
-            self.y = (window_height as i32) - (scaled_height as i32);
-        }
-    }
-
     pub fn render(&self, canvas: &mut Canvas<Window>) -> Result<(), String> {
-        let scale = 2; // 2x zoom scale
-        let scaled_width = self.width * scale;
-        let scaled_height = self.height * scale;
+        const SPRITE_SCALE: u32 = 2;
+        let scaled_width = self.width * SPRITE_SCALE;
+        let scaled_height = self.height * SPRITE_SCALE;
         let dest_rect = Rect::new(self.x, self.y, scaled_width, scaled_height);
 
         if let Some(sprite_sheet) = self.animation_controller.get_current_sprite_sheet() {
@@ -218,9 +210,9 @@ impl<'a> Player<'a> {
         self.last_attack_time = Instant::now();
 
         // Calculate attack position from player's hitbox center
-        let scale = 2; // Match rendering scale
-        let hitbox_center_x = self.x + (self.hitbox_offset_x * scale) + (self.hitbox_width as i32 * scale / 2);
-        let hitbox_center_y = self.y + (self.hitbox_offset_y * scale) + (self.hitbox_height as i32 * scale / 2);
+        const SPRITE_SCALE: i32 = 2;
+        let hitbox_center_x = self.x + (self.hitbox_offset_x * SPRITE_SCALE) + (self.hitbox_width as i32 * SPRITE_SCALE / 2);
+        let hitbox_center_y = self.y + (self.hitbox_offset_y * SPRITE_SCALE) + (self.hitbox_height as i32 * SPRITE_SCALE / 2);
 
         Some(AttackEvent::new(
             self.stats.attack_damage,
@@ -258,6 +250,9 @@ impl<'a> Player<'a> {
 
         if result.is_fatal {
             self.die();
+        } else {
+            // Play damage animation (only if not dead)
+            self.is_taking_damage = true;
         }
 
         result
@@ -315,11 +310,11 @@ impl<'a> Collidable for Player<'a> {
     fn get_bounds(&self) -> Rect {
         // Use configurable hitbox instead of full sprite size
         // This allows fine-tuning collision to match actual sprite artwork
-        let scale = 2;
-        let offset_x = self.hitbox_offset_x * scale as i32;
-        let offset_y = self.hitbox_offset_y * scale as i32;
-        let scaled_width = self.hitbox_width * scale;
-        let scaled_height = self.hitbox_height * scale;
+        const SPRITE_SCALE: u32 = 2;
+        let offset_x = self.hitbox_offset_x * SPRITE_SCALE as i32;
+        let offset_y = self.hitbox_offset_y * SPRITE_SCALE as i32;
+        let scaled_width = self.hitbox_width * SPRITE_SCALE;
+        let scaled_height = self.hitbox_height * SPRITE_SCALE;
 
         Rect::new(
             self.x + offset_x,

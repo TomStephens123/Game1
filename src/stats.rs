@@ -247,7 +247,7 @@ impl Stats {
         Stats {
             health: Health::new(10.0),
             movement_speed: 3.0,
-            attack_damage: 10.0,
+            attack_damage: 3.0,  // 3 damage per hit (slimes have 8 HP, so 3 hits to kill)
             attack_speed: 3.0,
             defense: 0.0,
             max_health: 10.0,

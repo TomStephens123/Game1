@@ -14,6 +14,7 @@ use std::time::SystemTime;
 pub struct SaveManager {
     save_directory: PathBuf,
     current_save_slot: u8,
+    #[allow(dead_code)] // Reserved for future autosave feature
     autosave_interval: std::time::Duration,
     last_autosave: Option<SystemTime>,
 }
@@ -39,6 +40,7 @@ impl SaveManager {
     }
 
     /// Sets the current save slot (1-5)
+    #[allow(dead_code)] // Reserved for future multi-slot save feature
     pub fn set_save_slot(&mut self, slot: u8) {
         self.current_save_slot = slot.clamp(1, 5);
     }
@@ -100,6 +102,7 @@ impl SaveManager {
     }
 
     /// Check if autosave is needed
+    #[allow(dead_code)] // Reserved for future autosave feature
     pub fn should_autosave(&self) -> bool {
         if let Some(last_save) = self.last_autosave {
             if let Ok(elapsed) = SystemTime::now().duration_since(last_save) {
@@ -110,6 +113,7 @@ impl SaveManager {
     }
 
     /// List all save files
+    #[allow(dead_code)] // Reserved for future save UI/menu
     pub fn list_saves(&self) -> Result<Vec<SaveFileInfo>, SaveError> {
         let mut saves = Vec::new();
 
@@ -149,6 +153,7 @@ impl SaveManager {
     }
 
     /// Delete old autosaves, keeping only the N most recent per slot
+    #[allow(dead_code)] // Reserved for future autosave feature
     pub fn cleanup_autosaves(&self, keep_count: usize) -> Result<(), SaveError> {
         // Group autosaves by slot
         for slot in 1..=5u8 {
@@ -184,6 +189,7 @@ impl SaveManager {
     }
 
     /// Check if a save file exists for a given slot
+    #[allow(dead_code)] // Reserved for future save UI/menu
     pub fn save_exists(&self, slot: u8) -> bool {
         let filename = format!("slot_{}.json", slot);
         let filepath = self.save_directory.join(filename);
@@ -191,6 +197,7 @@ impl SaveManager {
     }
 }
 
+#[allow(dead_code)] // Reserved for future save UI/menu
 pub struct SaveFileInfo {
     pub filename: String,
     pub timestamp: SystemTime,

@@ -57,6 +57,7 @@ pub enum SaveError {
     SerializationError(serde_json::Error),
     InvalidVersion(u32),
     CorruptedData(String),
+    #[allow(dead_code)] // Reserved for future entity system
     EntityNotFound(u64),
 }
 

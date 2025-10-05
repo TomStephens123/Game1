@@ -12,6 +12,7 @@ pub enum TileId {
 /// Definition of a tile type with its properties
 #[derive(Debug, Clone)]
 pub struct TileType {
+    #[allow(dead_code)] // Used for tile type identification
     pub id: TileId,
     #[allow(dead_code)]
     pub name: String,
@@ -29,12 +30,14 @@ pub struct TileRegistry {
 }
 
 impl TileRegistry {
+    #[allow(dead_code)] // Reserved for future tile system
     pub fn new() -> Self {
         Self {
             tiles: HashMap::new(),
         }
     }
 
+    #[allow(dead_code)] // Reserved for future tile system
     pub fn register(&mut self, tile_type: TileType) {
         self.tiles.insert(tile_type.id, tile_type);
     }

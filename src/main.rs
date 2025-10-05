@@ -23,7 +23,7 @@ use combat::{DamageEvent, DamageSource};
 use player::Player;
 use save::{SaveManager, SaveFile, SaveMetadata, SaveType, WorldSaveData, EntitySaveData, Saveable, SaveData, CURRENT_SAVE_VERSION};
 use slime::Slime;
-use tile::{TileId, TileRegistry, TileType, WorldGrid, RenderGrid};
+use tile::{TileId, WorldGrid, RenderGrid};
 use std::time::SystemTime;
 
 // Game resolution constants
@@ -45,45 +45,72 @@ enum ExitMenuOption {
     Cancel,
 }
 
-
-fn load_character_texture(
-    texture_creator: &sdl2::render::TextureCreator<sdl2::video::WindowContext>,
-) -> Result<sdl2::render::Texture<'_>, String> {
-    texture_creator
-        .load_texture("assets/sprites/new_player/Character-Base.png")
-        .map_err(|e| format!("Failed to load Character-Base.png: {}", e))
+/// Debug menu state
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum DebugMenuState {
+    Closed,
+    Open { selected_index: usize },
 }
 
-fn load_slime_texture(
-    texture_creator: &sdl2::render::TextureCreator<sdl2::video::WindowContext>,
-) -> Result<sdl2::render::Texture<'_>, String> {
-    texture_creator
-        .load_texture("assets/sprites/slime/Slime.png")
-        .map_err(|e| format!("Failed to load Slime.png: {}", e))
+/// Debug menu items that can be adjusted
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum DebugMenuItem {
+    PlayerMaxHealth,
+    PlayerAttackDamage,
+    PlayerAttackSpeed,
+    SlimeHealth,
+    SlimeContactDamage,
 }
 
-fn load_background_texture(
-    texture_creator: &sdl2::render::TextureCreator<sdl2::video::WindowContext>,
-) -> Result<sdl2::render::Texture<'_>, String> {
-    texture_creator
-        .load_texture("assets/backgrounds/background_meadow.png")
-        .map_err(|e| format!("Failed to load background_meadow.png: {}", e))
+impl DebugMenuItem {
+    fn all() -> Vec<Self> {
+        vec![
+            Self::PlayerMaxHealth,
+            Self::PlayerAttackDamage,
+            Self::PlayerAttackSpeed,
+            Self::SlimeHealth,
+            Self::SlimeContactDamage,
+        ]
+    }
+
+    fn name(&self) -> &str {
+        match self {
+            Self::PlayerMaxHealth => "Player Max HP",
+            Self::PlayerAttackDamage => "Player Damage",
+            Self::PlayerAttackSpeed => "Player Atk Spd",
+            Self::SlimeHealth => "Slime Health",
+            Self::SlimeContactDamage => "Slime Contact Dmg",
+        }
+    }
 }
 
-fn load_grass_tile_texture(
-    texture_creator: &sdl2::render::TextureCreator<sdl2::video::WindowContext>,
-) -> Result<sdl2::render::Texture<'_>, String> {
-    texture_creator
-        .load_texture("assets/backgrounds/tileable/grass_tile.png")
-        .map_err(|e| format!("Failed to load grass_tile.png: {}", e))
+/// Debug configuration for combat tuning
+#[derive(Debug, Clone)]
+struct DebugConfig {
+    slime_base_health: i32,
+    slime_contact_damage: f32,
 }
 
-fn load_punch_texture(
-    texture_creator: &sdl2::render::TextureCreator<sdl2::video::WindowContext>,
-) -> Result<sdl2::render::Texture<'_>, String> {
+impl DebugConfig {
+    fn new() -> Self {
+        DebugConfig {
+            slime_base_health: 8,
+            slime_contact_damage: 1.0,
+        }
+    }
+}
+
+
+/// Generic texture loading helper
+///
+/// Loads a texture from the given path with consistent error handling
+fn load_texture<'a>(
+    texture_creator: &'a sdl2::render::TextureCreator<sdl2::video::WindowContext>,
+    path: &str,
+) -> Result<sdl2::render::Texture<'a>, String> {
     texture_creator
-        .load_texture("assets/sprites/new_player/punch_effect.png")
-        .map_err(|e| format!("Failed to load punch_effect.png: {}", e))
+        .load_texture(path)
+        .map_err(|e| format!("Failed to load {}: {}", path, e))
 }
 
 // REMOVED: Old repetitive setup functions replaced with AnimationConfig::create_controller()!
@@ -167,7 +194,7 @@ fn load_game<'a>(
                 // Set up animation controller with textures
                 let animation_controller = player_config.create_controller(
                     character_texture,
-                    &["idle", "running", "attack"],
+                    &["idle", "running", "attack", "damage", "death"],
                 ).map_err(|e| format!("Failed to create player animations: {}", e))?;
 
                 loaded_player.set_animation_controller(animation_controller);
@@ -187,7 +214,7 @@ fn load_game<'a>(
                 // Set up animation controller with textures
                 let slime_animation_controller = slime_config.create_controller(
                     slime_texture,
-                    &["slime_idle", "jump"],
+                    &["slime_idle", "jump", "slime_damage", "slime_death"],
                 ).map_err(|e| format!("Failed to create slime animations: {}", e))?;
 
                 loaded_slime.set_animation_controller(slime_animation_controller);
@@ -298,18 +325,51 @@ fn draw_simple_text(
         // 5x7 bitmap font patterns (1 = pixel on, 0 = pixel off)
         let pattern: &[u8] = match c.to_ascii_uppercase() {
             'A' => &[0b01110, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001],
+            'B' => &[0b11110, 0b10001, 0b10001, 0b11110, 0b10001, 0b10001, 0b11110],
             'C' => &[0b01110, 0b10001, 0b10000, 0b10000, 0b10000, 0b10001, 0b01110],
             'D' => &[0b11110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b11110],
             'E' => &[0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b11111],
+            'F' => &[0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b10000],
             'G' => &[0b01110, 0b10001, 0b10000, 0b10111, 0b10001, 0b10001, 0b01110],
+            'H' => &[0b10001, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001],
             'I' => &[0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b11111],
+            'J' => &[0b00111, 0b00010, 0b00010, 0b00010, 0b00010, 0b10010, 0b01100],
+            'K' => &[0b10001, 0b10010, 0b10100, 0b11000, 0b10100, 0b10010, 0b10001],
             'L' => &[0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b11111],
+            'M' => &[0b10001, 0b11011, 0b10101, 0b10001, 0b10001, 0b10001, 0b10001],
             'N' => &[0b10001, 0b11001, 0b10101, 0b10011, 0b10001, 0b10001, 0b10001],
             'O' => &[0b01110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110],
+            'P' => &[0b11110, 0b10001, 0b10001, 0b11110, 0b10000, 0b10000, 0b10000],
+            'Q' => &[0b01110, 0b10001, 0b10001, 0b10001, 0b10101, 0b10010, 0b01101],
+            'R' => &[0b11110, 0b10001, 0b10001, 0b11110, 0b10100, 0b10010, 0b10001],
             'S' => &[0b01110, 0b10001, 0b10000, 0b01110, 0b00001, 0b10001, 0b01110],
             'T' => &[0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100],
+            'U' => &[0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110],
             'V' => &[0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01010, 0b00100],
+            'W' => &[0b10001, 0b10001, 0b10001, 0b10001, 0b10101, 0b11011, 0b10001],
             'X' => &[0b10001, 0b10001, 0b01010, 0b00100, 0b01010, 0b10001, 0b10001],
+            'Y' => &[0b10001, 0b10001, 0b01010, 0b00100, 0b00100, 0b00100, 0b00100],
+            'Z' => &[0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0b11111],
+            '0' => &[0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110],
+            '1' => &[0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110],
+            '2' => &[0b01110, 0b10001, 0b00001, 0b00110, 0b01000, 0b10000, 0b11111],
+            '3' => &[0b11111, 0b00010, 0b00100, 0b00010, 0b00001, 0b10001, 0b01110],
+            '4' => &[0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010],
+            '5' => &[0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110],
+            '6' => &[0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110],
+            '7' => &[0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000],
+            '8' => &[0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110],
+            '9' => &[0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100],
+            ':' => &[0b00000, 0b00000, 0b00100, 0b00000, 0b00100, 0b00000, 0b00000],
+            '/' => &[0b00001, 0b00010, 0b00010, 0b00100, 0b01000, 0b01000, 0b10000],
+            '<' => &[0b00010, 0b00100, 0b01000, 0b10000, 0b01000, 0b00100, 0b00010],
+            '>' => &[0b01000, 0b00100, 0b00010, 0b00001, 0b00010, 0b00100, 0b01000],
+            '-' => &[0b00000, 0b00000, 0b00000, 0b11111, 0b00000, 0b00000, 0b00000],
+            '+' => &[0b00000, 0b00100, 0b00100, 0b11111, 0b00100, 0b00100, 0b00000],
+            '.' => &[0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b01100, 0b01100],
+            '!' => &[0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00000, 0b00100],
+            '(' => &[0b00010, 0b00100, 0b01000, 0b01000, 0b01000, 0b00100, 0b00010],
+            ')' => &[0b01000, 0b00100, 0b00010, 0b00010, 0b00010, 0b00100, 0b01000],
             ' ' => &[0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000],
             _ => &[0b11111, 0b11111, 0b11111, 0b11111, 0b11111, 0b11111, 0b11111], // Full block for unknown
         };
@@ -428,6 +488,165 @@ fn render_exit_menu(
     Ok(())
 }
 
+/// Render the debug stats menu overlay
+fn render_debug_menu(
+    canvas: &mut sdl2::render::Canvas<sdl2::video::Window>,
+    player: &Player,
+    debug_config: &DebugConfig,
+    selected_index: usize,
+) -> Result<(), String> {
+    // Semi-transparent overlay
+    canvas.set_blend_mode(sdl2::render::BlendMode::Blend);
+    canvas.set_draw_color(sdl2::pixels::Color::RGBA(0, 0, 0, 200));
+    canvas.fill_rect(None)?;
+    canvas.set_blend_mode(sdl2::render::BlendMode::None);
+
+    // Menu box dimensions
+    let menu_width = 400;
+    let menu_height = 280;
+    let menu_x = (GAME_WIDTH - menu_width) / 2;
+    let menu_y = (GAME_HEIGHT - menu_height) / 2;
+
+    // Menu background
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(20, 20, 30));
+    canvas.fill_rect(sdl2::rect::Rect::new(
+        menu_x as i32,
+        menu_y as i32,
+        menu_width,
+        menu_height,
+    ))?;
+
+    // Menu border
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(80, 120, 180));
+    canvas.draw_rect(sdl2::rect::Rect::new(
+        menu_x as i32,
+        menu_y as i32,
+        menu_width,
+        menu_height,
+    ))?;
+    canvas.draw_rect(sdl2::rect::Rect::new(
+        (menu_x + 2) as i32,
+        (menu_y + 2) as i32,
+        menu_width - 4,
+        menu_height - 4,
+    ))?;
+
+    // Title
+    draw_simple_text(
+        canvas,
+        "DEBUG STATS",
+        (menu_x + 120) as i32,
+        (menu_y + 15) as i32,
+        sdl2::pixels::Color::RGB(180, 220, 255),
+        2,
+    )?;
+
+    // Subtitle
+    draw_simple_text(
+        canvas,
+        "F3 TO CLOSE",
+        (menu_x + 140) as i32,
+        (menu_y + 35) as i32,
+        sdl2::pixels::Color::RGB(120, 140, 160),
+        1,
+    )?;
+
+    // Menu items
+    let items = DebugMenuItem::all();
+    let item_y_start = menu_y + 60;
+    let item_height = 35;
+
+    for (i, item) in items.iter().enumerate() {
+        let item_y = item_y_start + (i as u32 * item_height);
+        let is_selected = i == selected_index;
+
+        // Selection highlight
+        if is_selected {
+            canvas.set_draw_color(sdl2::pixels::Color::RGB(40, 60, 100));
+            canvas.fill_rect(sdl2::rect::Rect::new(
+                (menu_x + 10) as i32,
+                item_y as i32 - 2,
+                menu_width - 20,
+                30,
+            ))?;
+        }
+
+        // Item name
+        let text_color = if is_selected {
+            sdl2::pixels::Color::RGB(255, 255, 255)
+        } else {
+            sdl2::pixels::Color::RGB(180, 180, 190)
+        };
+
+        draw_simple_text(
+            canvas,
+            item.name(),
+            (menu_x + 20) as i32,
+            item_y as i32,
+            text_color,
+            2,
+        )?;
+
+        // Item value
+        let value_text = match item {
+            DebugMenuItem::PlayerMaxHealth => format!("{}", player.stats.max_health as i32),
+            DebugMenuItem::PlayerAttackDamage => format!("{}", player.stats.attack_damage as i32),
+            DebugMenuItem::PlayerAttackSpeed => format!("{:.1}", player.stats.attack_speed),
+            DebugMenuItem::SlimeHealth => format!("{}", debug_config.slime_base_health),
+            DebugMenuItem::SlimeContactDamage => format!("{:.1}", debug_config.slime_contact_damage),
+        };
+
+        draw_simple_text(
+            canvas,
+            &value_text,
+            (menu_x + 280) as i32,
+            item_y as i32,
+            sdl2::pixels::Color::RGB(100, 255, 100),
+            2,
+        )?;
+
+        // Arrow indicators for selected item
+        if is_selected {
+            draw_simple_text(
+                canvas,
+                "<",
+                (menu_x + 260) as i32,
+                item_y as i32,
+                sdl2::pixels::Color::RGB(255, 200, 100),
+                2,
+            )?;
+            draw_simple_text(
+                canvas,
+                ">",
+                (menu_x + 350) as i32,
+                item_y as i32,
+                sdl2::pixels::Color::RGB(255, 200, 100),
+                2,
+            )?;
+        }
+    }
+
+    // Controls hint
+    draw_simple_text(
+        canvas,
+        "ARROWS   NAVIGATE",
+        (menu_x + 40) as i32,
+        (menu_y + 245) as i32,
+        sdl2::pixels::Color::RGB(140, 140, 150),
+        1,
+    )?;
+    draw_simple_text(
+        canvas,
+        "SHIFT   10",
+        (menu_x + 220) as i32,
+        (menu_y + 245) as i32,
+        sdl2::pixels::Color::RGB(140, 140, 150),
+        1,
+    )?;
+
+    Ok(())
+}
+
 fn main() -> Result<(), String> {
     let sdl_context = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;
@@ -465,32 +684,16 @@ fn main() -> Result<(), String> {
     // Animation system loaded successfully
 
     // Load sprite textures
-    let character_texture = load_character_texture(&texture_creator)?;
-    let slime_texture = load_slime_texture(&texture_creator)?;
-    let _background_texture = load_background_texture(&texture_creator)?;
-    let punch_texture = load_punch_texture(&texture_creator)?;
-    let grass_tile_texture = load_grass_tile_texture(&texture_creator)?;
-
-    // Setup tile system - Create and register tile types
-    let mut _tile_registry = TileRegistry::new();
-    _tile_registry.register(TileType {
-        id: TileId::Grass,
-        name: "Grass".to_string(),
-        tile_size: 32,
-    });
-    _tile_registry.register(TileType {
-        id: TileId::Dirt,
-        name: "Dirt".to_string(),
-        tile_size: 32,
-    });
+    let character_texture = load_texture(&texture_creator, "assets/sprites/new_player/Character-Base.png")?;
+    let slime_texture = load_texture(&texture_creator, "assets/sprites/slime/Slime.png")?;
+    let _background_texture = load_texture(&texture_creator, "assets/backgrounds/background_meadow.png")?;
+    let punch_texture = load_texture(&texture_creator, "assets/sprites/new_player/punch_effect.png")?;
+    let grass_tile_texture = load_texture(&texture_creator, "assets/backgrounds/tileable/grass_tile.png")?;
 
     // Tile placement state
     let mut selected_tile = TileId::Grass;
     let mut is_painting = false; // Track if mouse button is held down
     let mut last_painted_tile: Option<(i32, i32)> = None; // Prevent painting same tile multiple times
-
-    // Vector to store slimes spawned by mouse clicks
-    let mut slimes: Vec<Slime> = Vec::new();
 
     // Vector to store active attack effects (punch visuals)
     let mut attack_effects: Vec<AttackEffect> = Vec::new();
@@ -526,7 +729,7 @@ fn main() -> Result<(), String> {
                 // Setup player with animations
                 let animation_controller = player_config.create_controller(
                     &character_texture,
-                    &["idle", "running", "attack"],
+                    &["idle", "running", "attack", "damage", "death"],
                 )?;
                 let mut new_player = Player::new(300, 200, 32, 32, 3);
                 new_player.set_animation_controller(animation_controller);
@@ -542,6 +745,10 @@ fn main() -> Result<(), String> {
     // Game state for menu handling
     let mut game_state = GameState::Playing;
     let mut exit_menu_selection = ExitMenuOption::SaveAndExit;
+
+    // Debug menu state
+    let mut debug_menu_state = DebugMenuState::Closed;
+    let mut debug_config = DebugConfig::new();
 
     // Window boundary collision - invisible walls at screen edges
     // Made 10px thick to reliably catch player hitbox
@@ -560,6 +767,7 @@ fn main() -> Result<(), String> {
     println!("Controls:");
     println!("WASD - Move player");
     println!("M Key - Attack");
+    println!("F3 - Debug Stats Menu (adjust combat values!)");
     println!("F5 - Quick Save");
     println!("F9 - Load Game");
     println!("ESC - Exit Menu (Save & Exit, Exit Without Saving, Cancel)");
@@ -659,6 +867,114 @@ fn main() -> Result<(), String> {
                         }
                         Err(e) => {
                             eprintln!("Failed to load: {}", e);
+                        }
+                    }
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::F3),
+                    ..
+                } if game_state == GameState::Playing => {
+                    // Toggle debug menu
+                    debug_menu_state = match debug_menu_state {
+                        DebugMenuState::Closed => {
+                            println!("Debug menu: OPEN");
+                            DebugMenuState::Open { selected_index: 0 }
+                        }
+                        DebugMenuState::Open { .. } => {
+                            println!("Debug menu: CLOSED");
+                            DebugMenuState::Closed
+                        }
+                    };
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::Up),
+                    ..
+                } if matches!(debug_menu_state, DebugMenuState::Open { .. }) => {
+                    // Navigate up in debug menu
+                    if let DebugMenuState::Open { selected_index } = debug_menu_state {
+                        let items = DebugMenuItem::all();
+                        let new_index = if selected_index == 0 {
+                            items.len() - 1
+                        } else {
+                            selected_index - 1
+                        };
+                        debug_menu_state = DebugMenuState::Open { selected_index: new_index };
+                    }
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::Down),
+                    ..
+                } if matches!(debug_menu_state, DebugMenuState::Open { .. }) => {
+                    // Navigate down in debug menu
+                    if let DebugMenuState::Open { selected_index } = debug_menu_state {
+                        let items = DebugMenuItem::all();
+                        let new_index = (selected_index + 1) % items.len();
+                        debug_menu_state = DebugMenuState::Open { selected_index: new_index };
+                    }
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::Left),
+                    keymod,
+                    ..
+                } if matches!(debug_menu_state, DebugMenuState::Open { .. }) => {
+                    // Decrease stat value
+                    if let DebugMenuState::Open { selected_index } = debug_menu_state {
+                        let items = DebugMenuItem::all();
+                        let item = items[selected_index];
+                        let shift_held = keymod.intersects(sdl2::keyboard::Mod::LSHIFTMOD | sdl2::keyboard::Mod::RSHIFTMOD);
+                        let delta = if shift_held { -10.0 } else { -1.0 };
+
+                        match item {
+                            DebugMenuItem::PlayerMaxHealth => {
+                                let new_val = (player.stats.max_health + delta).max(1.0);
+                                player.stats.max_health = new_val;
+                                player.stats.health.set_max(new_val);
+                            }
+                            DebugMenuItem::PlayerAttackDamage => {
+                                player.stats.attack_damage = (player.stats.attack_damage + delta).max(0.0);
+                            }
+                            DebugMenuItem::PlayerAttackSpeed => {
+                                player.stats.attack_speed = (player.stats.attack_speed + delta).max(0.1);
+                            }
+                            DebugMenuItem::SlimeHealth => {
+                                debug_config.slime_base_health = (debug_config.slime_base_health as f32 + delta).max(1.0) as i32;
+                            }
+                            DebugMenuItem::SlimeContactDamage => {
+                                debug_config.slime_contact_damage = (debug_config.slime_contact_damage + delta).max(0.0);
+                            }
+                        }
+                    }
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::Right),
+                    keymod,
+                    ..
+                } if matches!(debug_menu_state, DebugMenuState::Open { .. }) => {
+                    // Increase stat value
+                    if let DebugMenuState::Open { selected_index } = debug_menu_state {
+                        let items = DebugMenuItem::all();
+                        let item = items[selected_index];
+                        let shift_held = keymod.intersects(sdl2::keyboard::Mod::LSHIFTMOD | sdl2::keyboard::Mod::RSHIFTMOD);
+                        let delta = if shift_held { 10.0 } else { 1.0 };
+
+                        match item {
+                            DebugMenuItem::PlayerMaxHealth => {
+                                let new_val = player.stats.max_health + delta;
+                                player.stats.max_health = new_val;
+                                player.stats.health.set_max(new_val);
+                            }
+                            DebugMenuItem::PlayerAttackDamage => {
+                                player.stats.attack_damage += delta;
+                            }
+                            DebugMenuItem::PlayerAttackSpeed => {
+                                player.stats.attack_speed += delta;
+                            }
+                            DebugMenuItem::SlimeHealth => {
+                                debug_config.slime_base_health = (debug_config.slime_base_health as f32 + delta) as i32;
+                            }
+                            DebugMenuItem::SlimeContactDamage => {
+                                debug_config.slime_contact_damage += delta;
+                            }
                         }
                     }
                 }
@@ -768,11 +1084,14 @@ fn main() -> Result<(), String> {
                     // Using factory method - clean and simple!
                     let slime_animation_controller = slime_config.create_controller(
                         &slime_texture,
-                        &["slime_idle", "jump"],
+                        &["slime_idle", "jump", "slime_damage", "slime_death"],
                     )?;
                     // Center slime on click (32 * SPRITE_SCALE / 2 = offset)
                     let center_offset = (32 * SPRITE_SCALE / 2) as i32;
-                    slimes.push(Slime::new(x - center_offset, y - center_offset, slime_animation_controller));
+                    let mut new_slime = Slime::new(x - center_offset, y - center_offset, slime_animation_controller);
+                    // Apply debug config health
+                    new_slime.health = debug_config.slime_base_health;
+                    slimes.push(new_slime);
                 }
                 _ => {}
             }
@@ -785,7 +1104,30 @@ fn main() -> Result<(), String> {
             player.update(&keyboard_state);
             // Bounds handled by collision system with static boundary objects
 
-            // Update slimes
+            // Attack hit detection
+            // IMPORTANT: Process attacks BEFORE slime updates to ensure invulnerability
+            // timing is correct. This prevents slimes from being hit on the same frame
+            // their damage animation finishes.
+            if let Some(ref attack) = active_attack {
+                let attack_hitbox = attack.get_hitbox();
+
+                for slime in &mut slimes {
+                    let slime_bounds = slime.get_bounds();
+
+                    // Check if attack hitbox intersects with slime
+                    if collision::aabb_intersect(&attack_hitbox, &slime_bounds) {
+                        // Hit! Deal damage to slime
+                        slime.take_damage(attack.damage as i32);
+                    }
+                }
+
+                // Clear attack after processing (attacks are one-frame)
+                active_attack = None;
+            }
+
+            // Update slimes AFTER attack processing
+            // This ensures behavior state changes (TakingDamage -> Idle) happen
+            // after invulnerability checks, preventing same-frame hits
             for slime in &mut slimes {
                 slime.update();
             }
@@ -798,25 +1140,6 @@ fn main() -> Result<(), String> {
 
         // Remove finished attack effects
         attack_effects.retain(|effect| !effect.is_finished());
-
-        // Attack hit detection
-        // Check if active attack hits any slimes
-        if let Some(ref attack) = active_attack {
-            let attack_hitbox = attack.get_hitbox();
-
-            for slime in &mut slimes {
-                let slime_bounds = slime.get_bounds();
-
-                // Check if attack hitbox intersects with slime
-                if collision::aabb_intersect(&attack_hitbox, &slime_bounds) {
-                    // Hit! Deal damage to slime
-                    slime.take_damage(attack.damage as i32);
-                }
-            }
-
-            // Clear attack after processing (attacks are one-frame)
-            active_attack = None;
-        }
 
         // Collision detection and response (for pushing, not damage)
         // Game loop pattern: Update → Collision → Render
@@ -847,7 +1170,7 @@ fn main() -> Result<(), String> {
 
             // Contact damage: slime touches player (not while attacking)
             if !player.is_attacking {
-                let damage = DamageEvent::physical(1.0, DamageSource::Enemy);
+                let damage = DamageEvent::physical(debug_config.slime_contact_damage, DamageSource::Enemy);
                 player.take_damage(damage);
             }
         }
@@ -990,6 +1313,11 @@ fn main() -> Result<(), String> {
         // Render exit menu if active
         if game_state == GameState::ExitMenu {
             render_exit_menu(&mut canvas, exit_menu_selection)?;
+        }
+
+        // Render debug menu if active
+        if let DebugMenuState::Open { selected_index } = debug_menu_state {
+            render_debug_menu(&mut canvas, &player, &debug_config, selected_index)?;
         }
 
         canvas.present();

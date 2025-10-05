@@ -11,6 +11,8 @@ use std::time::Instant;
 enum SlimeBehavior {
     Idle,
     Jumping,
+    TakingDamage,  // Playing damage animation
+    Dying,         // Playing death animation
 }
 
 pub struct Slime<'a> {
@@ -21,6 +23,7 @@ pub struct Slime<'a> {
     pub height: u32,
     animation_controller: AnimationController<'a>,
     behavior: SlimeBehavior,
+    previous_behavior: SlimeBehavior,  // Track behavior before damage/death
     behavior_timer: Instant,
     jump_height: i32,
     jump_duration: f32, // Duration of jump animation in seconds
@@ -46,10 +49,11 @@ impl<'a> Slime<'a> {
             height: 32,
             animation_controller,
             behavior: SlimeBehavior::Idle,
+            previous_behavior: SlimeBehavior::Idle,  // Start as idle
             behavior_timer: Instant::now(),
             jump_height: 20, // How high the slime bounces
             jump_duration: 0.5, // Jump lasts 0.5 seconds total (2x faster)
-            health: 3, // Slimes take 3 hits to kill
+            health: 8, // Slimes have 8 HP (takes 3 hits of 3 damage to kill)
             is_alive: true,
 
             // Default hitbox for slime (smaller, rounder character)
@@ -65,7 +69,21 @@ impl<'a> Slime<'a> {
         self.animation_controller = controller;
     }
 
+    /// Returns true if the slime is currently invulnerable
+    ///
+    /// Slimes are invulnerable while playing their damage or death animations.
+    /// This prevents stunlock and ensures visual feedback completes.
+    pub fn is_invulnerable(&self) -> bool {
+        matches!(self.behavior, SlimeBehavior::TakingDamage | SlimeBehavior::Dying)
+    }
+
     pub fn update(&mut self) {
+        // IMPORTANT: Update animation controller FIRST
+        // This ensures animations are reset before we check is_animation_finished()
+        // Otherwise, checking a "once" animation that was previously finished will
+        // return true even though we just set it to play again
+        self.animation_controller.update();
+
         let elapsed_time = self.behavior_timer.elapsed().as_secs_f32();
 
         // Game Dev Pattern: Simple AI State Machine
@@ -74,6 +92,7 @@ impl<'a> Slime<'a> {
             SlimeBehavior::Idle => {
                 // Idle for 2 seconds, then switch to jumping
                 if elapsed_time >= 2.0 {
+                    self.previous_behavior = self.behavior.clone();
                     self.behavior = SlimeBehavior::Jumping;
                     self.behavior_timer = Instant::now();
                     self.animation_controller.set_state("jump".to_string());
@@ -89,6 +108,7 @@ impl<'a> Slime<'a> {
             SlimeBehavior::Jumping => {
                 // Jump for jump_duration, then return to idle
                 if elapsed_time >= self.jump_duration {
+                    self.previous_behavior = self.behavior.clone();
                     self.behavior = SlimeBehavior::Idle;
                     self.behavior_timer = Instant::now();
                     self.animation_controller.set_state("slime_idle".to_string());
@@ -101,16 +121,36 @@ impl<'a> Slime<'a> {
                     self.y = self.base_y - jump_offset;
                 }
             }
+            SlimeBehavior::TakingDamage => {
+                // Play damage animation, then return to previous behavior
+                if self.animation_controller.is_animation_finished() {
+                    // Return to whatever we were doing before (idle or jumping)
+                    self.behavior = self.previous_behavior.clone();
+                    self.behavior_timer = Instant::now();
+
+                    // Set appropriate animation based on previous behavior
+                    match self.previous_behavior {
+                        SlimeBehavior::Idle => self.animation_controller.set_state("slime_idle".to_string()),
+                        SlimeBehavior::Jumping => self.animation_controller.set_state("jump".to_string()),
+                        _ => self.animation_controller.set_state("slime_idle".to_string()),
+                    }
+                }
+            }
+            SlimeBehavior::Dying => {
+                // Play death animation, then mark as dead when finished
+                if self.animation_controller.is_animation_finished() {
+                    self.is_alive = false;
+                }
+            }
         }
 
-        // Always update animation controller
-        self.animation_controller.update();
+        // Animation controller already updated at the beginning of this function
     }
 
     pub fn render(&self, canvas: &mut Canvas<Window>) -> Result<(), String> {
-        let scale = 2; // 2x zoom scale
-        let scaled_width = self.width * scale;
-        let scaled_height = self.height * scale;
+        const SPRITE_SCALE: u32 = 2;
+        let scaled_width = self.width * SPRITE_SCALE;
+        let scaled_height = self.height * SPRITE_SCALE;
         let dest_rect = Rect::new(self.x, self.y, scaled_width, scaled_height);
 
         if let Some(sprite_sheet) = self.animation_controller.get_current_sprite_sheet() {
@@ -137,14 +177,33 @@ impl<'a> Slime<'a> {
     /// Deals damage to the slime.
     ///
     /// Returns true if the slime died from this damage.
+    ///
+    /// Slimes are invulnerable while playing damage or death animations,
+    /// preventing stunlock and ensuring visual feedback completes.
     pub fn take_damage(&mut self, damage: i32) -> bool {
+        // Check invulnerability (state-based: invulnerable during damage/death animations)
+        if self.is_invulnerable() {
+            return false;
+        }
+
         self.health -= damage;
 
         if self.health <= 0 {
-            self.is_alive = false;
+            // Start death animation (don't set is_alive = false until animation finishes)
+            // Slime becomes invulnerable while dying
+            self.previous_behavior = self.behavior.clone();
+            self.behavior = SlimeBehavior::Dying;
+            self.behavior_timer = Instant::now();
+            self.animation_controller.set_state("slime_death".to_string());
             return true;
         }
 
+        // Take damage but still alive - play damage animation
+        // Slime becomes invulnerable while taking damage (animation lasts 300ms)
+        self.previous_behavior = self.behavior.clone();
+        self.behavior = SlimeBehavior::TakingDamage;
+        self.behavior_timer = Instant::now();
+        self.animation_controller.set_state("slime_damage".to_string());
         false
     }
 
@@ -168,11 +227,11 @@ impl<'a> Slime<'a> {
 impl<'a> Collidable for Slime<'a> {
     fn get_bounds(&self) -> Rect {
         // Use configurable hitbox instead of full sprite size
-        let scale = 2;
-        let offset_x = self.hitbox_offset_x * scale as i32;
-        let offset_y = self.hitbox_offset_y * scale as i32;
-        let scaled_width = self.hitbox_width * scale;
-        let scaled_height = self.hitbox_height * scale;
+        const SPRITE_SCALE: u32 = 2;
+        let offset_x = self.hitbox_offset_x * SPRITE_SCALE as i32;
+        let offset_y = self.hitbox_offset_y * SPRITE_SCALE as i32;
+        let scaled_width = self.hitbox_width * SPRITE_SCALE;
+        let scaled_height = self.hitbox_height * SPRITE_SCALE;
 
         // Use current Y position (self.y), not base_y
         // This ensures collision detection works when slime is jumping
@@ -267,6 +326,7 @@ impl Saveable for Slime<'_> {
 
         // Note: Behavior state and timers are NOT saved
         // Slimes will start in Idle state with reset timers
+        // Invulnerability is derived from behavior state (not saved separately)
 
         Ok(slime)
     }
