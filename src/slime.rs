@@ -102,7 +102,7 @@ impl<'a> Slime<'a> {
     }
 
     pub fn render(&self, canvas: &mut Canvas<Window>) -> Result<(), String> {
-        let scale = 3; // 3x zoom scale
+        let scale = 2; // 2x zoom scale
         let scaled_width = self.width * scale;
         let scaled_height = self.height * scale;
         let dest_rect = Rect::new(self.x, self.y, scaled_width, scaled_height);
@@ -136,7 +136,6 @@ impl<'a> Slime<'a> {
 
         if self.health <= 0 {
             self.is_alive = false;
-            println!("Slime defeated!");
             return true;
         }
 
@@ -163,7 +162,7 @@ impl<'a> Slime<'a> {
 impl<'a> Collidable for Slime<'a> {
     fn get_bounds(&self) -> Rect {
         // Use configurable hitbox instead of full sprite size
-        let scale = 3;
+        let scale = 2;
         let offset_x = self.hitbox_offset_x * scale as i32;
         let offset_y = self.hitbox_offset_y * scale as i32;
         let scaled_width = self.hitbox_width * scale;

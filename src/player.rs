@@ -1,5 +1,7 @@
 use crate::animation::{AnimationController, AnimationState, Direction, determine_animation_state};
 use crate::collision::{Collidable, CollisionLayer};
+use crate::combat::{AttackEvent, DamageEvent, PlayerState, calculate_damage_with_defense};
+use crate::stats::{Stats, DamageResult};
 use sdl2::keyboard::Scancode;
 use sdl2::rect::Rect;
 use sdl2::render::Canvas;
@@ -11,19 +13,25 @@ pub struct Player<'a> {
     pub y: i32,
     pub width: u32,
     pub height: u32,
-    pub speed: i32,
     pub velocity_x: i32,
     pub velocity_y: i32,
     pub direction: Direction,
     pub is_attacking: bool,
     animation_controller: AnimationController<'a>,
 
-    // Health and damage system
-    pub health: i32,
-    pub max_health: i32,
+    // New comprehensive stats system
+    pub stats: Stats,
+
+    // Player state (Alive/Dead)
+    pub state: PlayerState,
+
+    // Invulnerability system (keep existing pattern)
     pub is_invulnerable: bool,
     invulnerability_timer: Instant,
     invulnerability_duration: f32, // seconds
+
+    // Attack cooldown system
+    last_attack_time: Instant,
 
     // Collision hitbox configuration
     // Allows tuning the collision box independently from sprite rendering
@@ -35,22 +43,26 @@ pub struct Player<'a> {
 
 impl<'a> Player<'a> {
     pub fn new(x: i32, y: i32, width: u32, height: u32, speed: i32) -> Self {
+        let mut stats = Stats::new();
+        // Set movement speed from parameter (for backward compatibility)
+        stats.movement_speed = speed as f32;
+
         Player {
             x,
             y,
             width,
             height,
-            speed,
             velocity_x: 0,
             velocity_y: 0,
             direction: Direction::South,
             is_attacking: false,
             animation_controller: AnimationController::new(),
-            health: 10,
-            max_health: 10,
+            stats,
+            state: PlayerState::Alive,
             is_invulnerable: false,
             invulnerability_timer: Instant::now(),
             invulnerability_duration: 1.0, // 1 second of invulnerability after taking damage
+            last_attack_time: Instant::now(),
 
             // Default hitbox tuned to match actual sprite artwork
             hitbox_offset_x: 8,  // 8 pixels from left edge (centered)
@@ -68,22 +80,25 @@ impl<'a> Player<'a> {
         self.velocity_x = 0;
         self.velocity_y = 0;
 
+        // Get effective movement speed from stats (will support modifiers later)
+        let effective_speed = self.stats.movement_speed as i32;
+
         // Only allow movement if not attacking
         if !self.is_attacking {
             // Vertical movement
             if keyboard_state.is_scancode_pressed(Scancode::W) {
-                self.velocity_y -= self.speed;
+                self.velocity_y -= effective_speed;
             }
             if keyboard_state.is_scancode_pressed(Scancode::S) {
-                self.velocity_y += self.speed;
+                self.velocity_y += effective_speed;
             }
 
             // Horizontal movement
             if keyboard_state.is_scancode_pressed(Scancode::A) {
-                self.velocity_x -= self.speed;
+                self.velocity_x -= effective_speed;
             }
             if keyboard_state.is_scancode_pressed(Scancode::D) {
-                self.velocity_x += self.speed;
+                self.velocity_x += effective_speed;
             }
         }
 
@@ -124,7 +139,7 @@ impl<'a> Player<'a> {
         } else {
             // Only consider horizontal movement for running animation
             // Vertical movement during attacks shouldn't trigger running animation
-            determine_animation_state(self.velocity_x, self.velocity_y, self.speed)
+            determine_animation_state(self.velocity_x, self.velocity_y, effective_speed)
         };
 
         self.animation_controller.set_state(new_state);
@@ -132,7 +147,7 @@ impl<'a> Player<'a> {
     }
 
     pub fn keep_in_bounds(&mut self, window_width: u32, window_height: u32) {
-        let scale = 3; // Match rendering scale
+        let scale = 2; // Match rendering scale
         let scaled_width = self.width * scale;
         let scaled_height = self.height * scale;
 
@@ -151,7 +166,7 @@ impl<'a> Player<'a> {
     }
 
     pub fn render(&self, canvas: &mut Canvas<Window>) -> Result<(), String> {
-        let scale = 3; // 3x zoom scale
+        let scale = 2; // 2x zoom scale
         let scaled_width = self.width * scale;
         let scaled_height = self.height * scale;
         let dest_rect = Rect::new(self.x, self.y, scaled_width, scaled_height);
@@ -177,10 +192,40 @@ impl<'a> Player<'a> {
         (self.velocity_x, self.velocity_y)
     }
 
-    pub fn start_attack(&mut self) {
-        if !self.is_attacking {
-            self.is_attacking = true;
+    /// Checks if the player can attack (not attacking, alive, and cooldown ready)
+    pub fn can_attack(&self) -> bool {
+        if !self.state.is_alive() || self.is_attacking {
+            return false;
         }
+
+        // Attack cooldown based on attack_speed stat
+        // attack_speed is attacks per second, so cooldown = 1.0 / attack_speed
+        let attack_cooldown = 1.0 / self.stats.attack_speed;
+        self.last_attack_time.elapsed().as_secs_f32() >= attack_cooldown
+    }
+
+    /// Attempts to start an attack
+    ///
+    /// Returns Some(AttackEvent) if attack was successful, None if on cooldown
+    pub fn start_attack(&mut self) -> Option<AttackEvent> {
+        if !self.can_attack() {
+            return None;
+        }
+
+        self.is_attacking = true;
+        self.last_attack_time = Instant::now();
+
+        // Calculate attack position from player's hitbox center
+        let scale = 2; // Match rendering scale
+        let hitbox_center_x = self.x + (self.hitbox_offset_x * scale) + (self.hitbox_width as i32 * scale / 2);
+        let hitbox_center_y = self.y + (self.hitbox_offset_y * scale) + (self.hitbox_height as i32 * scale / 2);
+
+        Some(AttackEvent::new(
+            self.stats.attack_damage,
+            (hitbox_center_x, hitbox_center_y),
+            self.direction,
+            32, // Attack range in pixels (balanced for close-range combat)
+        ))
     }
 
     /// Applies a push force to the player (used for collision response).
@@ -192,33 +237,51 @@ impl<'a> Player<'a> {
         self.y += push_y;
     }
 
-    /// Deals damage to the player if not invulnerable.
+    /// Deals damage to the player using a DamageEvent
     ///
-    /// Returns true if damage was taken, false if player was invulnerable.
-    pub fn take_damage(&mut self, damage: i32) -> bool {
-        if self.is_invulnerable {
-            return false;
+    /// This applies defense calculations based on damage type and returns detailed results
+    pub fn take_damage(&mut self, damage_event: DamageEvent) -> DamageResult {
+        if self.is_invulnerable || !self.state.is_alive() {
+            return DamageResult::no_damage();
         }
 
-        self.health -= damage;
+        // Calculate final damage with defense
+        let final_damage = calculate_damage_with_defense(&damage_event, self.stats.defense);
+
+        let result = self.stats.health.take_damage(final_damage);
+
+        // Activate invulnerability after taking damage
         self.is_invulnerable = true;
         self.invulnerability_timer = Instant::now();
 
-        println!("Player took {} damage! Health: {}/{}", damage, self.health, self.max_health);
-
-        if self.health <= 0 {
-            println!("Player died!");
+        if result.is_fatal {
+            self.die();
         }
 
-        true
+        result
+    }
+
+    /// Handles player death
+    fn die(&mut self) {
+        self.state = PlayerState::Dead {
+            death_time: Instant::now(),
+        };
+    }
+
+    /// Heals the player
+    ///
+    /// Returns the actual amount healed (may be less than requested if near max health)
+    pub fn heal(&mut self, amount: f32) -> f32 {
+        if !self.is_alive() {
+            return 0.0;
+        }
+
+        self.stats.health.heal(amount)
     }
 
     /// Returns true if the player is alive.
-    ///
-    /// Note: Currently unused but included for future game over detection.
-    #[allow(dead_code)]
     pub fn is_alive(&self) -> bool {
-        self.health > 0
+        self.stats.health.is_alive()
     }
 
     /// Sets custom hitbox parameters for fine-tuning collision detection.
@@ -243,12 +306,12 @@ impl<'a> Player<'a> {
 // Collision System Implementation
 //
 // This trait implementation makes Player participate in the collision system.
-// The collision bounds match the player's rendered size (accounting for 3x scale).
+// The collision bounds match the player's rendered size (accounting for 2x scale).
 impl<'a> Collidable for Player<'a> {
     fn get_bounds(&self) -> Rect {
         // Use configurable hitbox instead of full sprite size
         // This allows fine-tuning collision to match actual sprite artwork
-        let scale = 3;
+        let scale = 2;
         let offset_x = self.hitbox_offset_x * scale as i32;
         let offset_y = self.hitbox_offset_y * scale as i32;
         let scaled_width = self.hitbox_width * scale;
