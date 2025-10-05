@@ -201,20 +201,18 @@ fn main() -> Result<(), String> {
     // Debug toggle for tile grid visualization
     let mut show_tile_grid = false;
 
-    // Create static world objects (obstacles)
-    // These are immovable objects the player cannot pass through
-    // Updated for 640x360 resolution with 32px borders
+    // Window boundary collision - invisible walls at screen edges
+    // Made 10px thick to reliably catch player hitbox
+    let boundary_thickness = 10;
     let static_objects = vec![
-        // Top border wall
-        StaticObject::new(0, 0, GAME_WIDTH, 32),
-        // Left border wall
-        StaticObject::new(0, 0, 32, GAME_HEIGHT),
-        // Right border wall
-        StaticObject::new((GAME_WIDTH - 32) as i32, 0, 32, GAME_HEIGHT),
-        // Bottom border wall
-        StaticObject::new(0, (GAME_HEIGHT - 32) as i32, GAME_WIDTH, 32),
-        // Central obstacle (rock/building) - positioned proportionally
-        StaticObject::new(280, 140, 80, 80),
+        // Top boundary
+        StaticObject::new(0, -(boundary_thickness as i32), GAME_WIDTH, boundary_thickness),
+        // Left boundary
+        StaticObject::new(-(boundary_thickness as i32), 0, boundary_thickness, GAME_HEIGHT),
+        // Right boundary
+        StaticObject::new(GAME_WIDTH as i32, 0, boundary_thickness, GAME_HEIGHT),
+        // Bottom boundary
+        StaticObject::new(0, GAME_HEIGHT as i32, GAME_WIDTH, boundary_thickness),
     ];
 
     println!("Controls:");
@@ -364,7 +362,7 @@ fn main() -> Result<(), String> {
         // Update player
         let keyboard_state = event_pump.keyboard_state();
         player.update(&keyboard_state);
-        player.keep_in_bounds(GAME_WIDTH, GAME_HEIGHT);
+        // Bounds handled by collision system with static boundary objects
 
         // Update slimes
         for slime in &mut slimes {
