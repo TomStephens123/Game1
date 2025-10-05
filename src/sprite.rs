@@ -142,6 +142,54 @@ impl<'a> SpriteSheet<'a> {
         self.render_directional(canvas, dest_rect, flip_horizontal, Direction::South)
     }
 
+    /// Renders the sprite with rotation based on direction
+    ///
+    /// Used for non-directional sprites (effects, projectiles) that need to be rotated
+    /// to match the facing direction.
+    pub fn render_rotated(
+        &self,
+        canvas: &mut Canvas<Window>,
+        dest_rect: Rect,
+        direction: Direction,
+    ) -> Result<(), String> {
+        if self.frames.is_empty() {
+            return Err("No frames to render".to_string());
+        }
+
+        let base_frame = &self.frames[self.current_frame];
+        let src_rect = Rect::new(
+            base_frame.x,
+            base_frame.y,
+            base_frame.width,
+            base_frame.height,
+        );
+
+        // Calculate rotation angle based on direction
+        // Sprite is assumed to be facing East (0 degrees) by default
+        let angle = match direction {
+            Direction::East => 0.0,
+            Direction::SouthEast => 45.0,
+            Direction::South => 90.0,
+            Direction::SouthWest => 135.0,
+            Direction::West => 180.0,
+            Direction::NorthWest => 225.0,
+            Direction::North => 270.0,
+            Direction::NorthEast => 315.0,
+        };
+
+        canvas
+            .copy_ex(
+                self.texture,
+                Some(src_rect),
+                Some(dest_rect),
+                angle,
+                None,
+                false,
+                false,
+            )
+            .map_err(|e| e.to_string())
+    }
+
     pub fn render_directional(
         &self,
         canvas: &mut Canvas<Window>,

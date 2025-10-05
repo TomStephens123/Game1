@@ -3,12 +3,14 @@ use sdl2::image::LoadTexture;
 use sdl2::keyboard::Keycode;
 
 mod animation;
+mod attack_effect;
 mod collision;
 mod player;
 mod slime;
 mod sprite;
 
 use animation::AnimationConfig;
+use attack_effect::AttackEffect;
 use collision::{
     calculate_overlap, check_collisions_with_collection, check_static_collisions, Collidable,
     StaticCollidable, StaticObject,
@@ -39,6 +41,14 @@ fn load_background_texture(
     texture_creator
         .load_texture("assets/backgrounds/background_meadow.png")
         .map_err(|e| format!("Failed to load background_meadow.png: {}", e))
+}
+
+fn load_punch_texture(
+    texture_creator: &sdl2::render::TextureCreator<sdl2::video::WindowContext>,
+) -> Result<sdl2::render::Texture<'_>, String> {
+    texture_creator
+        .load_texture("assets/sprites/new_player/punch_effect.png")
+        .map_err(|e| format!("Failed to load punch_effect.png: {}", e))
 }
 
 // REMOVED: Old repetitive setup functions replaced with AnimationConfig::create_controller()!
@@ -74,16 +84,20 @@ fn main() -> Result<(), String> {
         .map_err(|e| format!("Failed to load player animation config: {}", e))?;
     let slime_config = AnimationConfig::load_from_file("assets/config/slime_animations.json")
         .map_err(|e| format!("Failed to load slime animation config: {}", e))?;
+    let punch_config = AnimationConfig::load_from_file("assets/config/punch_effect.json")
+        .map_err(|e| format!("Failed to load punch effect config: {}", e))?;
 
     // Validation: Print available animations (helpful during development)
     println!("\n=== Animation System Loaded ===");
     println!("Player animations: {:?}", player_config.available_states());
     println!("Slime animations: {:?}", slime_config.available_states());
+    println!("Punch effect animations: {:?}", punch_config.available_states());
 
     // Load sprite textures
     let character_texture = load_character_texture(&texture_creator)?;
     let slime_texture = load_slime_texture(&texture_creator)?;
     let background_texture = load_background_texture(&texture_creator)?;
+    let punch_texture = load_punch_texture(&texture_creator)?;
 
     // Setup player with animations using new factory function
     // Game Dev Pattern: This single line replaces 27 lines of boilerplate!
@@ -99,6 +113,9 @@ fn main() -> Result<(), String> {
 
     // Vector to store slimes spawned by mouse clicks
     let mut slimes: Vec<Slime> = Vec::new();
+
+    // Vector to store active attack effects (punch visuals)
+    let mut attack_effects: Vec<AttackEffect> = Vec::new();
 
     // Debug toggle for collision visualization
     let mut show_collision_boxes = false;
@@ -148,6 +165,38 @@ fn main() -> Result<(), String> {
                     ..
                 } => {
                     player.start_attack();
+
+                    // Spawn punch effect in front of player based on their direction
+                    // Calculate offset based on player's facing direction
+                    let (offset_x, offset_y) = match player.direction {
+                        crate::animation::Direction::North => (0, -32),
+                        crate::animation::Direction::NorthEast => (32, -32),
+                        crate::animation::Direction::East => (32, 0),
+                        crate::animation::Direction::SouthEast => (32, 32),
+                        crate::animation::Direction::South => (0, 32),
+                        crate::animation::Direction::SouthWest => (-32, 32),
+                        crate::animation::Direction::West => (-32, 0),
+                        crate::animation::Direction::NorthWest => (-32, -32),
+                    };
+
+                    let effect_x = player.x + offset_x;
+                    let effect_y = player.y + offset_y;
+
+                    match punch_config.create_controller(&punch_texture, &["punch"]) {
+                        Ok(punch_animation_controller) => {
+                            attack_effects.push(AttackEffect::new(
+                                effect_x,
+                                effect_y,
+                                32,
+                                32,
+                                player.direction,
+                                punch_animation_controller,
+                            ));
+                        }
+                        Err(e) => {
+                            eprintln!("ERROR: Failed to create punch controller: {}", e);
+                        }
+                    }
                 }
                 Event::KeyDown {
                     keycode: Some(Keycode::B),
@@ -178,6 +227,14 @@ fn main() -> Result<(), String> {
         for slime in &mut slimes {
             slime.update();
         }
+
+        // Update attack effects
+        for effect in &mut attack_effects {
+            effect.update();
+        }
+
+        // Remove finished attack effects
+        attack_effects.retain(|effect| !effect.is_finished());
 
         // Collision detection and response
         // Game loop pattern: Update → Collision → Render
@@ -264,6 +321,11 @@ fn main() -> Result<(), String> {
         // Render slimes
         for slime in &slimes {
             slime.render(&mut canvas)?;
+        }
+
+        // Render attack effects (on top of player/slimes to show attack range)
+        for effect in &attack_effects {
+            effect.render(&mut canvas, 3)?; // Scale 3x to match player scale
         }
 
         // Debug: Render collision boxes (toggle with 'B' key)

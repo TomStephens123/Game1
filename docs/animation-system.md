@@ -663,11 +663,422 @@ if player.has_special_ability {
 
 ---
 
+---
+
+## Visual Effects (VFX) System
+
+### Overview
+
+The VFX system provides a clean, extensible way to create temporary visual effects that are separate from entity animations. This is commonly used for:
+- **Attack indicators** - Show the range/hitbox of attacks (e.g., punch effect)
+- **Particle effects** - Explosions, magic spells, impacts
+- **Environmental effects** - Dust clouds, water splashes, item pickups
+- **UI feedback** - Damage numbers, level-up animations
+
+### Architecture
+
+The VFX system follows the **same factory pattern** as entity animations, making it consistent and easy to use.
+
+#### Core Component: `AttackEffect` (Generalizable to `VisualEffect`)
+
+**File:** `src/attack_effect.rs`
+
+```rust
+pub struct AttackEffect<'a> {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub direction: Direction,  // For future directional effects
+    animation_controller: AnimationController<'a>,
+}
+```
+
+**Key Responsibilities:**
+- Self-contained visual effect with its own animation
+- Positioned independently from entities
+- Automatically cleaned up when animation finishes
+- Uses same animation system as entities (no special cases!)
+
+#### How It Works
+
+**1. Configuration** (JSON file):
+```json
+{
+  "frame_width": 32,
+  "frame_height": 32,
+  "animations": {
+    "punch": {
+      "frames": [
+        { "x": 0, "y": 0, "duration_ms": 80 },
+        { "x": 32, "y": 0, "duration_ms": 80 },
+        { "x": 64, "y": 0, "duration_ms": 80 },
+        { "x": 96, "y": 0, "duration_ms": 80 }
+      ],
+      "animation_mode": "once"
+    }
+  }
+}
+```
+
+**2. Loading** (in `main.rs`):
+```rust
+// Load config and texture (same pattern as entities)
+let punch_config = AnimationConfig::load_from_file("assets/config/punch_effect.json")?;
+let punch_texture = load_punch_texture(&texture_creator)?;
+```
+
+**3. Spawning Effects** (in game loop):
+```rust
+// When player attacks, spawn effect in front of them
+let (offset_x, offset_y) = calculate_direction_offset(player.direction);
+
+let punch_animation_controller = punch_config.create_controller(
+    &punch_texture,
+    &["punch"],
+)?;
+
+attack_effects.push(AttackEffect::new(
+    player.x + offset_x,
+    player.y + offset_y,
+    32,
+    32,
+    player.direction,
+    punch_animation_controller,
+));
+```
+
+**4. Update & Cleanup** (each frame):
+```rust
+// Update all effects
+for effect in &mut attack_effects {
+    effect.update();
+}
+
+// Remove finished effects (automatic cleanup!)
+attack_effects.retain(|effect| !effect.is_finished());
+```
+
+**5. Rendering** (each frame):
+```rust
+// Render after entities but before UI
+for effect in &attack_effects {
+    effect.render(&mut canvas, 3)?;  // Scale matches entities
+}
+```
+
+### Design Patterns Used
+
+#### 1. **Entity-Component Separation**
+Effects are **separate entities** from the player/enemies. This allows:
+- Multiple effects active at once
+- Independent lifetimes (effect continues after player moves)
+- Reusable effect definitions
+
+#### 2. **Factory Method Pattern**
+Uses the same `create_controller()` pattern as entities:
+```rust
+// Consistent API across all animation types!
+let player_controller = player_config.create_controller(&texture, &["idle", "running"])?;
+let effect_controller = effect_config.create_controller(&texture, &["punch"])?;
+```
+
+#### 3. **Automatic Resource Management**
+Rust's ownership system handles cleanup:
+- Effects remove themselves when finished (`retain()`)
+- No memory leaks
+- No manual cleanup code needed
+
+#### 4. **Composition Over Inheritance**
+`AttackEffect` **contains** an `AnimationController` rather than inheriting from it:
+```rust
+pub struct AttackEffect<'a> {
+    animation_controller: AnimationController<'a>,  // Composition
+}
+```
+
+This is Rust's preferred pattern (no inheritance in Rust!).
+
+### Current Implementation: Punch Attack Effect
+
+**Purpose:** Shows the range/hitbox of the player's punch attack
+
+**Files:**
+- `src/attack_effect.rs` - Effect struct and logic
+- `assets/config/punch_effect.json` - Animation config (4 frames, 80ms each)
+- `assets/sprites/new_player/punch_effect.png` - Sprite sheet (4x32x32 frames in a row)
+
+**Behavior:**
+1. Player presses M → `player.start_attack()`
+2. Game spawns `AttackEffect` 64 pixels in front of player (direction-based offset)
+3. Punch animation plays once (320ms total)
+4. Effect automatically removes itself when finished
+
+**Directional Positioning:**
+```rust
+let (offset_x, offset_y) = match player.direction {
+    Direction::North => (0, -64),
+    Direction::East => (64, 0),
+    Direction::South => (0, 64),
+    Direction::West => (-64, 0),
+    // ... diagonals ...
+};
+```
+
+This positions the effect correctly based on which way the player faces.
+
+### Adding New Effect Types
+
+The system is **highly extensible**. Here's how to add new effects:
+
+#### Example: Add an Explosion Effect
+
+**Step 1: Create Config** (`assets/config/explosion_effect.json`):
+```json
+{
+  "frame_width": 64,
+  "frame_height": 64,
+  "animations": {
+    "explode": {
+      "frames": [
+        { "x": 0, "y": 0, "duration_ms": 50 },
+        { "x": 64, "y": 0, "duration_ms": 50 },
+        { "x": 128, "y": 0, "duration_ms": 50 },
+        { "x": 192, "y": 0, "duration_ms": 100 },
+        { "x": 256, "y": 0, "duration_ms": 150 }
+      ],
+      "animation_mode": "once"
+    }
+  }
+}
+```
+
+**Step 2: Create Effect Struct** (`src/explosion_effect.rs`):
+```rust
+// Copy AttackEffect struct, rename to ExplosionEffect
+// Same structure, different purpose!
+pub struct ExplosionEffect<'a> {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    animation_controller: AnimationController<'a>,
+}
+
+impl<'a> ExplosionEffect<'a> {
+    pub fn new(x: i32, y: i32, animation_controller: AnimationController<'a>) -> Self {
+        let mut controller = animation_controller;
+        controller.set_state("explode".to_string());
+
+        ExplosionEffect {
+            x, y, width: 64, height: 64,
+            animation_controller: controller,
+        }
+    }
+
+    // Same update(), render(), is_finished() methods as AttackEffect
+}
+```
+
+**Step 3: Use in Game** (`main.rs`):
+```rust
+// Load config and texture
+let explosion_config = AnimationConfig::load_from_file("assets/config/explosion_effect.json")?;
+let explosion_texture = load_explosion_texture(&texture_creator)?;
+
+// Storage
+let mut explosion_effects: Vec<ExplosionEffect> = Vec::new();
+
+// Spawn when enemy dies:
+if enemy.health <= 0 {
+    let controller = explosion_config.create_controller(&explosion_texture, &["explode"])?;
+    explosion_effects.push(ExplosionEffect::new(enemy.x, enemy.y, controller));
+}
+
+// Update and render (same pattern)
+for effect in &mut explosion_effects {
+    effect.update();
+}
+explosion_effects.retain(|e| !e.is_finished());
+
+for effect in &explosion_effects {
+    effect.render(&mut canvas, 3)?;
+}
+```
+
+**That's it!** No changes to animation system core code.
+
+### Future Generalization: Unified `VisualEffect` Type
+
+Currently each effect type is its own struct (`AttackEffect`, potentially `ExplosionEffect`, etc.). We could generalize this:
+
+#### Proposed: Generic `VisualEffect` Type
+
+**File:** `src/visual_effect.rs`
+
+```rust
+/// Generic visual effect that can represent any temporary animation
+pub struct VisualEffect<'a> {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub direction: Direction,
+    pub scale: u32,  // Rendering scale
+    animation_controller: AnimationController<'a>,
+}
+
+impl<'a> VisualEffect<'a> {
+    /// Creates a new visual effect
+    ///
+    /// # Parameters
+    /// - `x`, `y`: Position to render
+    /// - `width`, `height`: Size of each frame
+    /// - `scale`: Rendering scale multiplier
+    /// - `state_name`: Which animation state to play (e.g., "punch", "explode")
+    /// - `animation_controller`: Controller with the effect's animations loaded
+    pub fn new(
+        x: i32,
+        y: i32,
+        width: u32,
+        height: u32,
+        scale: u32,
+        state_name: String,
+        mut animation_controller: AnimationController<'a>,
+    ) -> Self {
+        animation_controller.set_state(state_name);
+
+        VisualEffect {
+            x, y, width, height, scale,
+            direction: Direction::South,  // Default, can be set later
+            animation_controller,
+        }
+    }
+
+    // Same update(), render(), is_finished() methods
+}
+```
+
+**Benefits:**
+- Single struct for all effect types
+- Less code duplication
+- Easier to maintain
+
+**Usage:**
+```rust
+// All effects use the same type!
+let mut effects: Vec<VisualEffect> = Vec::new();
+
+// Spawn punch effect
+let punch = VisualEffect::new(x, y, 32, 32, 3, "punch".to_string(), punch_controller);
+effects.push(punch);
+
+// Spawn explosion effect
+let explosion = VisualEffect::new(x, y, 64, 64, 2, "explode".to_string(), explosion_controller);
+effects.push(explosion);
+```
+
+**Trade-off:** Less type safety (all effects in one Vec), but more flexible and less code.
+
+### Integration with Frame Events (Future)
+
+When the **Frame Event System** (see "Areas for Future Improvement") is implemented, effects can trigger events:
+
+**Example: Explosion damages enemies on frame 3**
+
+```json
+{
+  "animations": {
+    "explode": {
+      "frames": [
+        { "x": 0, "y": 0, "duration_ms": 50 },
+        { "x": 64, "y": 0, "duration_ms": 50 },
+        {
+          "x": 128, "y": 0, "duration_ms": 50,
+          "events": [
+            { "type": "spawn_hitbox", "x": 0, "y": 0, "width": 64, "height": 64, "damage": 5 }
+          ]
+        }
+      ]
+    }
+  }
+}
+```
+
+Then in game code:
+```rust
+for effect in &mut effects {
+    let events = effect.poll_events();
+    for event in events {
+        match event {
+            AnimationEvent::SpawnHitbox { x, y, width, height, damage } => {
+                // Check for enemies in hitbox, apply damage
+            }
+        }
+    }
+}
+```
+
+This would enable **data-driven VFX behavior** without code changes!
+
+### Best Practices
+
+#### 1. **Consistent Naming Convention**
+- Config files: `{effect_name}_effect.json`
+- Textures: `{effect_name}_effect.png`
+- State names: Lowercase with underscores (e.g., `"punch"`, `"big_explosion"`)
+
+#### 2. **Use `animation_mode: "once"` for Effects**
+Most VFX should play once and disappear:
+```json
+"animation_mode": "once"
+```
+
+If you want a looping effect (fire, sparks), use `"loop"` but handle removal manually.
+
+#### 3. **Scale Consistently**
+Match effect scale to entity scale for visual consistency:
+```rust
+effect.render(&mut canvas, 3)?;  // Same scale as player
+```
+
+#### 4. **Position Relative to Entities**
+Calculate effect position based on entity direction/position:
+```rust
+let offset = calculate_direction_offset(player.direction, 64);  // 64 pixels away
+let effect_x = player.x + offset.0;
+let effect_y = player.y + offset.1;
+```
+
+#### 5. **Cleanup Automatically**
+Always use `retain()` for automatic cleanup:
+```rust
+effects.retain(|e| !e.is_finished());
+```
+
+### Summary
+
+The VFX system demonstrates **excellent design principles**:
+
+✅ **Consistent** - Uses same animation system as entities
+✅ **Extensible** - Add new effects by creating config files
+✅ **Self-contained** - Effects manage their own lifecycle
+✅ **Composable** - Separate from entities, can spawn multiple
+✅ **Automatic** - Cleanup handled by Rust's ownership
+
+**Key Takeaway:** By reusing the animation system, we get a powerful VFX system "for free". This is the benefit of good architecture - new features compose naturally!
+
+---
+
 ## Areas for Future Improvement
 
 ### ✅ **COMPLETED: String-Based States & Factory Method**
 
 The first two major improvements have been implemented! See the "Recent Improvements" section at the top of this document for details.
+
+### ✅ **COMPLETED: Visual Effects (VFX) System**
+
+A clean, extensible VFX system has been implemented using the `AttackEffect` pattern. See the "Visual Effects (VFX) System" section above for details.
 
 ---
 

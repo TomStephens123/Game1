@@ -68,16 +68,17 @@ impl<'a> Player<'a> {
         self.velocity_x = 0;
         self.velocity_y = 0;
 
-        // Always allow vertical movement
-        if keyboard_state.is_scancode_pressed(Scancode::W) {
-            self.velocity_y -= self.speed;
-        }
-        if keyboard_state.is_scancode_pressed(Scancode::S) {
-            self.velocity_y += self.speed;
-        }
-
-        // Only allow horizontal movement if not attacking
+        // Only allow movement if not attacking
         if !self.is_attacking {
+            // Vertical movement
+            if keyboard_state.is_scancode_pressed(Scancode::W) {
+                self.velocity_y -= self.speed;
+            }
+            if keyboard_state.is_scancode_pressed(Scancode::S) {
+                self.velocity_y += self.speed;
+            }
+
+            // Horizontal movement
             if keyboard_state.is_scancode_pressed(Scancode::A) {
                 self.velocity_x -= self.speed;
             }
