@@ -43,3 +43,4 @@ Track Rust concepts learned through this project:
 ## Documentation
 - Place all documentation in docs/
 - Document key architectural decisions and their Rust-specific reasoning as the project develops.
+- Refer to documentation if work relates to higher level architecture decisions
