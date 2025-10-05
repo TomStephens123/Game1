@@ -10,7 +10,8 @@
 - Place all documentation in docs/
 - Document key architectural decisions and their Rust-specific reasoning as the project develops.
 - Refer to documentation if work relates to higher level architecture decisions
-- ignore tmp files unless instructed to most will be junk stuff
+- Ignore tmp files unless instructed to most will be junk stuff
+- **IMPORTANT**: All new features with persistent state MUST implement save/load functionality by default (see docs/save-system-design.md)
 
 ### Rust Learning Focus
 - Prioritize idiomatic Rust patterns over quick solutions
@@ -30,6 +31,7 @@
 - When running the game always fix warnings as well as errors - unless they relate to a feature that is implemented but not extended yet (e.g. you've set up but not used one of the animation states yet)
 - Write tests for core game logic
 - Document complex algorithms and game mechanics
+- **Always implement save/load for new entities**: Any new entity, system, or feature that has state which should persist between sessions MUST implement the `Saveable` trait (see implementation guide in docs/save-system-design.md)
 
 ### Recommended Commands
 - `cargo run` - Run the game in development mode

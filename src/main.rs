@@ -7,6 +7,7 @@ mod attack_effect;
 mod collision;
 mod combat;
 mod player;
+mod save;
 mod slime;
 mod sprite;
 mod stats;
@@ -20,13 +21,29 @@ use collision::{
 };
 use combat::{DamageEvent, DamageSource};
 use player::Player;
+use save::{SaveManager, SaveFile, SaveMetadata, SaveType, WorldSaveData, EntitySaveData, Saveable, SaveData, CURRENT_SAVE_VERSION};
 use slime::Slime;
 use tile::{TileId, TileRegistry, TileType, WorldGrid, RenderGrid};
+use std::time::SystemTime;
 
 // Game resolution constants
 const GAME_WIDTH: u32 = 640;
 const GAME_HEIGHT: u32 = 360;
 const SPRITE_SCALE: u32 = 2;
+
+/// Game state for menu/gameplay tracking
+#[derive(Debug, Clone, PartialEq)]
+enum GameState {
+    Playing,
+    ExitMenu,
+}
+
+/// Exit menu options
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ExitMenuOption {
+    SaveAndExit,
+    Cancel,
+}
 
 
 fn load_character_texture(
@@ -106,6 +123,311 @@ fn calculate_window_scale(video_subsystem: &sdl2::VideoSubsystem) -> u32 {
     }
 }
 
+/// Load game state from save file
+fn load_game<'a>(
+    save_manager: &SaveManager,
+    player_config: &AnimationConfig,
+    slime_config: &AnimationConfig,
+    character_texture: &'a sdl2::render::Texture<'a>,
+    slime_texture: &'a sdl2::render::Texture<'a>,
+) -> Result<(Player<'a>, Vec<Slime<'a>>, WorldGrid), String> {
+    // Load save file from slot 1
+    let save_file = save_manager.load_game(1)
+        .map_err(|e| format!("Failed to load save: {}", e))?;
+
+    println!("Loading game...");
+    println!("  - Save version: {}", save_file.version);
+    println!("  - Saved: {:?}", save_file.timestamp);
+
+    // Load world
+    let world_grid = WorldGrid::from_save_data(
+        save_file.world_state.width,
+        save_file.world_state.height,
+        save_file.world_state.tiles,
+    ).ok_or_else(|| "Failed to load world grid".to_string())?;
+
+    println!("  - Loaded world: {}x{} tiles", world_grid.width, world_grid.height);
+
+    // Load entities
+    let mut player: Option<Player> = None;
+    let mut slimes: Vec<Slime> = Vec::new();
+
+    for entity_data in save_file.entities {
+        match entity_data.entity_type.as_str() {
+            "player" => {
+                // Deserialize player
+                let save_data = SaveData {
+                    data_type: "player".to_string(),
+                    json_data: entity_data.data,
+                };
+
+                let mut loaded_player = Player::from_save_data(&save_data)
+                    .map_err(|e| format!("Failed to load player: {}", e))?;
+
+                // Set up animation controller with textures
+                let animation_controller = player_config.create_controller(
+                    character_texture,
+                    &["idle", "running", "attack"],
+                ).map_err(|e| format!("Failed to create player animations: {}", e))?;
+
+                loaded_player.set_animation_controller(animation_controller);
+                player = Some(loaded_player);
+                println!("  - Loaded player at ({}, {})", entity_data.position.0, entity_data.position.1);
+            }
+            "slime" => {
+                // Deserialize slime
+                let save_data = SaveData {
+                    data_type: "slime".to_string(),
+                    json_data: entity_data.data,
+                };
+
+                let mut loaded_slime = Slime::from_save_data(&save_data)
+                    .map_err(|e| format!("Failed to load slime: {}", e))?;
+
+                // Set up animation controller with textures
+                let slime_animation_controller = slime_config.create_controller(
+                    slime_texture,
+                    &["slime_idle", "jump"],
+                ).map_err(|e| format!("Failed to create slime animations: {}", e))?;
+
+                loaded_slime.set_animation_controller(slime_animation_controller);
+                slimes.push(loaded_slime);
+            }
+            unknown => {
+                eprintln!("Warning: Unknown entity type '{}', skipping", unknown);
+            }
+        }
+    }
+
+    let player = player.ok_or_else(|| "No player found in save file".to_string())?;
+    println!("  - Loaded {} slimes", slimes.len());
+    println!("✓ Game loaded successfully!");
+
+    Ok((player, slimes, world_grid))
+}
+
+/// Save the current game state
+fn save_game(
+    save_manager: &mut SaveManager,
+    player: &Player,
+    slimes: &[Slime],
+    world_grid: &WorldGrid,
+) -> Result<(), String> {
+    // Collect entity save data
+    let mut entities = Vec::new();
+
+    // Save player (entity_id = 0)
+    let player_save_data = player.to_save_data()
+        .map_err(|e| format!("Failed to save player: {}", e))?;
+
+    entities.push(EntitySaveData {
+        entity_id: 0,
+        entity_type: "player".to_string(),
+        position: player.position(),
+        data: player_save_data.json_data,
+    });
+
+    // Save slimes (entity_id starts from 1)
+    for (i, slime) in slimes.iter().enumerate() {
+        let slime_save_data = slime.to_save_data()
+            .map_err(|e| format!("Failed to save slime {}: {}", i, e))?;
+
+        entities.push(EntitySaveData {
+            entity_id: (i + 1) as u64,
+            entity_type: "slime".to_string(),
+            position: (slime.x, slime.y),
+            data: slime_save_data.json_data,
+        });
+    }
+
+    // Create world save data
+    let world_state = WorldSaveData {
+        width: world_grid.width,
+        height: world_grid.height,
+        tiles: world_grid.to_save_data(),
+    };
+
+    // Save counts for debug output
+    let entity_count = entities.len();
+    let slime_count = entities.len() - 1;
+    let world_width = world_state.width;
+    let world_height = world_state.height;
+
+    // Create save file
+    let save_file = SaveFile {
+        version: CURRENT_SAVE_VERSION,
+        timestamp: SystemTime::now(),
+        metadata: SaveMetadata {
+            game_version: env!("CARGO_PKG_VERSION").to_string(),
+            player_name: None,
+            playtime_seconds: 0, // TODO: track playtime
+            save_type: SaveType::Manual,
+            save_slot: save_manager.get_save_slot(),
+        },
+        world_state,
+        entities,
+    };
+
+    // Save to file
+    save_manager.save_game(&save_file)
+        .map_err(|e| format!("Save failed: {}", e))?;
+
+    println!("✓ Game saved successfully!");
+    println!("  - Saved {} entities ({} slimes)", entity_count, slime_count);
+    println!("  - Saved world: {}x{} tiles", world_width, world_height);
+    Ok(())
+}
+
+/// Simple helper to draw text using a basic 5x7 bitmap font
+fn draw_simple_text(
+    canvas: &mut sdl2::render::Canvas<sdl2::video::Window>,
+    text: &str,
+    x: i32,
+    y: i32,
+    color: sdl2::pixels::Color,
+    scale: u32,
+) -> Result<(), String> {
+    canvas.set_draw_color(color);
+
+    let char_width = 6 * scale;  // 5 pixels + 1 spacing
+    let pixel_size = scale as i32;
+
+    for (i, c) in text.chars().enumerate() {
+        let char_x = x + (i as i32 * char_width as i32);
+
+        // 5x7 bitmap font patterns (1 = pixel on, 0 = pixel off)
+        let pattern: &[u8] = match c.to_ascii_uppercase() {
+            'A' => &[0b01110, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001],
+            'C' => &[0b01110, 0b10001, 0b10000, 0b10000, 0b10000, 0b10001, 0b01110],
+            'D' => &[0b11110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b11110],
+            'E' => &[0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b11111],
+            'G' => &[0b01110, 0b10001, 0b10000, 0b10111, 0b10001, 0b10001, 0b01110],
+            'I' => &[0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b11111],
+            'L' => &[0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b11111],
+            'N' => &[0b10001, 0b11001, 0b10101, 0b10011, 0b10001, 0b10001, 0b10001],
+            'O' => &[0b01110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110],
+            'S' => &[0b01110, 0b10001, 0b10000, 0b01110, 0b00001, 0b10001, 0b01110],
+            'T' => &[0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100],
+            'V' => &[0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01010, 0b00100],
+            'X' => &[0b10001, 0b10001, 0b01010, 0b00100, 0b01010, 0b10001, 0b10001],
+            ' ' => &[0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000],
+            _ => &[0b11111, 0b11111, 0b11111, 0b11111, 0b11111, 0b11111, 0b11111], // Full block for unknown
+        };
+
+        // Draw the character pixel by pixel
+        for (row, &pattern_row) in pattern.iter().enumerate() {
+            for col in 0..5 {
+                if (pattern_row >> (4 - col)) & 1 == 1 {
+                    canvas.fill_rect(sdl2::rect::Rect::new(
+                        char_x + (col * pixel_size),
+                        y + (row as i32 * pixel_size),
+                        scale,
+                        scale,
+                    ))?;
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Render the exit menu overlay
+fn render_exit_menu(
+    canvas: &mut sdl2::render::Canvas<sdl2::video::Window>,
+    selected_option: ExitMenuOption,
+) -> Result<(), String> {
+    // Semi-transparent overlay (need to enable blend mode)
+    canvas.set_blend_mode(sdl2::render::BlendMode::Blend);
+    canvas.set_draw_color(sdl2::pixels::Color::RGBA(0, 0, 0, 180));
+    canvas.fill_rect(None)?;
+    canvas.set_blend_mode(sdl2::render::BlendMode::None);
+
+    // Draw menu box
+    let menu_width = 500;
+    let menu_height = 240;
+    let menu_x = (GAME_WIDTH - menu_width) / 2;
+    let menu_y = (GAME_HEIGHT - menu_height) / 2;
+
+    // Menu background
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(30, 30, 40));
+    canvas.fill_rect(sdl2::rect::Rect::new(
+        menu_x as i32,
+        menu_y as i32,
+        menu_width,
+        menu_height,
+    ))?;
+
+    // Menu border (double border for better visibility)
+    canvas.set_draw_color(sdl2::pixels::Color::RGB(100, 100, 120));
+    canvas.draw_rect(sdl2::rect::Rect::new(
+        menu_x as i32,
+        menu_y as i32,
+        menu_width,
+        menu_height,
+    ))?;
+    canvas.draw_rect(sdl2::rect::Rect::new(
+        (menu_x + 2) as i32,
+        (menu_y + 2) as i32,
+        menu_width - 4,
+        menu_height - 4,
+    ))?;
+
+    // Title
+    draw_simple_text(
+        canvas,
+        "EXIT",
+        (menu_x + 210) as i32,
+        (menu_y + 30) as i32,
+        sdl2::pixels::Color::RGB(220, 220, 240),
+        3,
+    )?;
+
+    // Option positions
+    let option_height = 60;
+    let option_start_y = menu_y + 100;
+
+    // Define options (only 2 options now)
+    let options = [
+        ("SAVE AND EXIT", ExitMenuOption::SaveAndExit),
+        ("CANCEL", ExitMenuOption::Cancel),
+    ];
+
+    for (i, (text, option)) in options.iter().enumerate() {
+        let option_y = option_start_y + (i as u32 * option_height);
+        let is_selected = *option == selected_option;
+
+        // Draw selection highlight
+        if is_selected {
+            canvas.set_draw_color(sdl2::pixels::Color::RGB(80, 100, 140));
+            canvas.fill_rect(sdl2::rect::Rect::new(
+                (menu_x + 15) as i32,
+                option_y as i32 - 3,
+                menu_width - 30,
+                36,
+            ))?;
+        }
+
+        // Draw option text (centered, larger)
+        let text_color = if is_selected {
+            sdl2::pixels::Color::RGB(255, 255, 255)
+        } else {
+            sdl2::pixels::Color::RGB(160, 160, 170)
+        };
+
+        draw_simple_text(
+            canvas,
+            text,
+            (menu_x + 80) as i32,
+            option_y as i32,
+            text_color,
+            3,
+        )?;
+    }
+
+    Ok(())
+}
+
 fn main() -> Result<(), String> {
     let sdl_context = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;
@@ -149,20 +471,7 @@ fn main() -> Result<(), String> {
     let punch_texture = load_punch_texture(&texture_creator)?;
     let grass_tile_texture = load_grass_tile_texture(&texture_creator)?;
 
-    // Setup player with animations using new factory function
-    // Game Dev Pattern: This single line replaces 27 lines of boilerplate!
-    let animation_controller = player_config.create_controller(
-        &character_texture,
-        &["idle", "running", "attack"],
-    )?;
-    let mut player = Player::new(300, 200, 32, 32, 3);
-    player.set_animation_controller(animation_controller);
-
-    // Hitbox is already tuned to sprite artwork (16x16 centered)
-    // Use player.set_hitbox() to adjust if needed, or press 'B' to visualize
-
-    // Setup tile system
-    // Create and register tile types
+    // Setup tile system - Create and register tile types
     let mut _tile_registry = TileRegistry::new();
     _tile_registry.register(TileType {
         id: TileId::Grass,
@@ -174,12 +483,6 @@ fn main() -> Result<(), String> {
         name: "Dirt".to_string(),
         tile_size: 32,
     });
-
-    // Create world grid (40x24 tiles, default to grass)
-    let mut world_grid = WorldGrid::new(40, 24, TileId::Grass);
-
-    // Create render grid based on world grid
-    let mut render_grid = RenderGrid::new(&world_grid);
 
     // Tile placement state
     let mut selected_tile = TileId::Grass;
@@ -201,6 +504,45 @@ fn main() -> Result<(), String> {
     // Debug toggle for tile grid visualization
     let mut show_tile_grid = false;
 
+    // Save system
+    let save_dir = dirs::home_dir()
+        .map(|p| p.join(".game1/saves"))
+        .unwrap_or_else(|| std::path::PathBuf::from("./saves"));
+    let mut save_manager = SaveManager::new(&save_dir)
+        .map_err(|e| format!("Failed to create save manager: {}", e))?;
+
+    // Try to load existing save on startup
+    let (mut player, mut slimes, mut world_grid, mut render_grid) =
+        match load_game(&save_manager, &player_config, &slime_config, &character_texture, &slime_texture) {
+            Ok((loaded_player, loaded_slimes, loaded_world)) => {
+                println!("✓ Loaded existing save!");
+                let loaded_render_grid = RenderGrid::new(&loaded_world);
+                (loaded_player, loaded_slimes, loaded_world, loaded_render_grid)
+            }
+            Err(_) => {
+                // No save exists, create new game
+                println!("No existing save found, starting new game");
+
+                // Setup player with animations
+                let animation_controller = player_config.create_controller(
+                    &character_texture,
+                    &["idle", "running", "attack"],
+                )?;
+                let mut new_player = Player::new(300, 200, 32, 32, 3);
+                new_player.set_animation_controller(animation_controller);
+
+                // Create world grid (40x24 tiles, default to grass)
+                let new_world_grid = WorldGrid::new(40, 24, TileId::Grass);
+                let new_render_grid = RenderGrid::new(&new_world_grid);
+
+                (new_player, Vec::new(), new_world_grid, new_render_grid)
+            }
+        };
+
+    // Game state for menu handling
+    let mut game_state = GameState::Playing;
+    let mut exit_menu_selection = ExitMenuOption::SaveAndExit;
+
     // Window boundary collision - invisible walls at screen edges
     // Made 10px thick to reliably catch player hitbox
     let boundary_thickness = 10;
@@ -218,13 +560,15 @@ fn main() -> Result<(), String> {
     println!("Controls:");
     println!("WASD - Move player");
     println!("M Key - Attack");
+    println!("F5 - Quick Save");
+    println!("F9 - Load Game");
+    println!("ESC - Exit Menu (Save & Exit, Exit Without Saving, Cancel)");
     println!("B Key - Toggle collision debug boxes");
     println!("G Key - Toggle tile grid debug view");
     println!("1 Key - Select Grass tile");
     println!("2 Key - Select Dirt tile");
     println!("Left Click - Place selected tile");
     println!("Right Click - Spawn slime");
-    println!("ESC - Exit");
     println!("\n=== NEW: Tile Placement System ===");
     println!("- Select tiles with 1 (Grass) or 2 (Dirt)");
     println!("- Left click to place tiles in the world");
@@ -238,11 +582,86 @@ fn main() -> Result<(), String> {
         // Handle events
         for event in event_pump.poll_iter() {
             match event {
-                Event::Quit { .. }
-                | Event::KeyDown {
+                Event::Quit { .. } => break 'running,
+                Event::KeyDown {
                     keycode: Some(Keycode::Escape),
                     ..
-                } => break 'running,
+                } => {
+                    match game_state {
+                        GameState::Playing => {
+                            // Open exit menu
+                            game_state = GameState::ExitMenu;
+                            exit_menu_selection = ExitMenuOption::SaveAndExit;
+                        }
+                        GameState::ExitMenu => {
+                            // Close menu (Cancel)
+                            game_state = GameState::Playing;
+                        }
+                    }
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::Up),
+                    ..
+                } if game_state == GameState::ExitMenu => {
+                    exit_menu_selection = match exit_menu_selection {
+                        ExitMenuOption::SaveAndExit => ExitMenuOption::Cancel,
+                        ExitMenuOption::Cancel => ExitMenuOption::SaveAndExit,
+                    };
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::Down),
+                    ..
+                } if game_state == GameState::ExitMenu => {
+                    exit_menu_selection = match exit_menu_selection {
+                        ExitMenuOption::SaveAndExit => ExitMenuOption::Cancel,
+                        ExitMenuOption::Cancel => ExitMenuOption::SaveAndExit,
+                    };
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::Return | Keycode::Space),
+                    ..
+                } if game_state == GameState::ExitMenu => {
+                    match exit_menu_selection {
+                        ExitMenuOption::SaveAndExit => {
+                            if let Err(e) = save_game(&mut save_manager, &player, &slimes, &world_grid) {
+                                eprintln!("Failed to save: {}", e);
+                            }
+                            break 'running;
+                        }
+                        ExitMenuOption::Cancel => {
+                            game_state = GameState::Playing;
+                        }
+                    }
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::F5),
+                    ..
+                } if game_state == GameState::Playing => {
+                    // Quick save
+                    if let Err(e) = save_game(&mut save_manager, &player, &slimes, &world_grid) {
+                        eprintln!("Failed to save: {}", e);
+                    }
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::F9),
+                    ..
+                } if game_state == GameState::Playing => {
+                    // Load game
+                    match load_game(&save_manager, &player_config, &slime_config, &character_texture, &slime_texture) {
+                        Ok((loaded_player, loaded_slimes, loaded_world)) => {
+                            player = loaded_player;
+                            slimes = loaded_slimes;
+                            world_grid = loaded_world;
+                            render_grid = RenderGrid::new(&world_grid);
+                            attack_effects.clear();
+                            active_attack = None;
+                            println!("✓ Game loaded successfully!");
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to load: {}", e);
+                        }
+                    }
+                }
                 Event::KeyDown {
                     keycode: Some(Keycode::M),
                     ..
@@ -359,14 +778,17 @@ fn main() -> Result<(), String> {
             }
         }
 
-        // Update player
-        let keyboard_state = event_pump.keyboard_state();
-        player.update(&keyboard_state);
-        // Bounds handled by collision system with static boundary objects
+        // Only update game state when not in menu
+        if game_state == GameState::Playing {
+            // Update player
+            let keyboard_state = event_pump.keyboard_state();
+            player.update(&keyboard_state);
+            // Bounds handled by collision system with static boundary objects
 
-        // Update slimes
-        for slime in &mut slimes {
-            slime.update();
+            // Update slimes
+            for slime in &mut slimes {
+                slime.update();
+            }
         }
 
         // Update attack effects
@@ -563,6 +985,11 @@ fn main() -> Result<(), String> {
                 player.velocity().1,
                 player.current_animation_state()
             );
+        }
+
+        // Render exit menu if active
+        if game_state == GameState::ExitMenu {
+            render_exit_menu(&mut canvas, exit_menu_selection)?;
         }
 
         canvas.present();

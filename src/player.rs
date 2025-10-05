@@ -1,11 +1,13 @@
 use crate::animation::{AnimationController, AnimationState, Direction, determine_animation_state};
 use crate::collision::{Collidable, CollisionLayer};
 use crate::combat::{AttackEvent, DamageEvent, PlayerState, calculate_damage_with_defense};
+use crate::save::{Saveable, SaveData, SaveError};
 use crate::stats::{Stats, DamageResult};
 use sdl2::keyboard::Scancode;
 use sdl2::rect::Rect;
 use sdl2::render::Canvas;
 use sdl2::video::Window;
+use serde::{Serialize, Deserialize};
 use std::time::Instant;
 
 pub struct Player<'a> {
@@ -329,5 +331,149 @@ impl<'a> Collidable for Player<'a> {
 
     fn get_collision_layer(&self) -> CollisionLayer {
         CollisionLayer::Player
+    }
+}
+
+// ==============================================================================
+// Save/Load Implementation
+// ==============================================================================
+
+impl Saveable for Player<'_> {
+    fn to_save_data(&self) -> Result<SaveData, SaveError> {
+        #[derive(Serialize)]
+        struct PlayerData {
+            // Position and movement
+            x: i32,
+            y: i32,
+            direction: String,
+
+            // Stats (health, movement speed, attack damage, etc.)
+            health_current: f32,
+            health_max: f32,
+            movement_speed: f32,
+            attack_damage: f32,
+            attack_speed: f32,
+            defense: f32,
+            max_health: f32,
+
+            // State
+            is_alive: bool,
+
+            // Hitbox configuration
+            hitbox_offset_x: i32,
+            hitbox_offset_y: i32,
+            hitbox_width: u32,
+            hitbox_height: u32,
+        }
+
+        // Determine if player is alive
+        let is_alive = self.state.is_alive();
+
+        let player_data = PlayerData {
+            x: self.x,
+            y: self.y,
+            direction: format!("{:?}", self.direction),
+            health_current: self.stats.health.current(),
+            health_max: self.stats.health.max(),
+            movement_speed: self.stats.movement_speed,
+            attack_damage: self.stats.attack_damage,
+            attack_speed: self.stats.attack_speed,
+            defense: self.stats.defense,
+            max_health: self.stats.max_health,
+            is_alive,
+            hitbox_offset_x: self.hitbox_offset_x,
+            hitbox_offset_y: self.hitbox_offset_y,
+            hitbox_width: self.hitbox_width,
+            hitbox_height: self.hitbox_height,
+        };
+
+        Ok(SaveData {
+            data_type: "player".to_string(),
+            json_data: serde_json::to_string(&player_data)?,
+        })
+    }
+
+    fn from_save_data(data: &SaveData) -> Result<Self, SaveError> {
+        #[derive(Deserialize)]
+        struct PlayerData {
+            x: i32,
+            y: i32,
+            direction: String,
+            health_current: f32,
+            health_max: f32,
+            movement_speed: f32,
+            attack_damage: f32,
+            attack_speed: f32,
+            defense: f32,
+            max_health: f32,
+            is_alive: bool,
+            hitbox_offset_x: i32,
+            hitbox_offset_y: i32,
+            hitbox_width: u32,
+            hitbox_height: u32,
+        }
+
+        if data.data_type != "player" {
+            return Err(SaveError::CorruptedData(format!(
+                "Expected player data, got {}",
+                data.data_type
+            )));
+        }
+
+        let player_data: PlayerData = serde_json::from_str(&data.json_data)?;
+
+        // Create player with position and initial speed
+        let mut player = Player::new(
+            player_data.x,
+            player_data.y,
+            32, // width
+            32, // height
+            player_data.movement_speed as i32,
+        );
+
+        // Restore stats
+        player.stats.health = crate::stats::Health::new(player_data.health_max);
+        // Set current health (take damage to reduce from max to current)
+        let damage_taken = player_data.health_max - player_data.health_current;
+        if damage_taken > 0.0 {
+            player.stats.health.take_damage(damage_taken);
+        }
+
+        player.stats.movement_speed = player_data.movement_speed;
+        player.stats.attack_damage = player_data.attack_damage;
+        player.stats.attack_speed = player_data.attack_speed;
+        player.stats.defense = player_data.defense;
+        player.stats.max_health = player_data.max_health;
+
+        // Restore direction
+        player.direction = match player_data.direction.as_str() {
+            "South" => Direction::South,
+            "SouthEast" => Direction::SouthEast,
+            "East" => Direction::East,
+            "NorthEast" => Direction::NorthEast,
+            "North" => Direction::North,
+            "NorthWest" => Direction::NorthWest,
+            "West" => Direction::West,
+            "SouthWest" => Direction::SouthWest,
+            _ => Direction::South, // Default fallback
+        };
+
+        // Restore player state (Alive/Dead)
+        if !player_data.is_alive {
+            player.state = PlayerState::Dead {
+                death_time: Instant::now(), // Reset death time to now
+            };
+        }
+
+        // Restore hitbox configuration
+        player.hitbox_offset_x = player_data.hitbox_offset_x;
+        player.hitbox_offset_y = player_data.hitbox_offset_y;
+        player.hitbox_width = player_data.hitbox_width;
+        player.hitbox_height = player_data.hitbox_height;
+
+        // Note: Animation controller, timers, and transient state are NOT saved
+        // They will be initialized to default values and set up externally
+
+        Ok(player)
     }
 }

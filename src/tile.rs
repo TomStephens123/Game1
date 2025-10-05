@@ -300,3 +300,65 @@ pub fn get_render_tile_neighbors(
         neighbors[3] == Some(tile_type),
     ]
 }
+
+// ==============================================================================
+// Save/Load Support for WorldGrid
+// ==============================================================================
+
+impl TileId {
+    /// Convert TileId to string for serialization
+    pub fn to_string(&self) -> String {
+        match self {
+            TileId::Grass => "grass".to_string(),
+            TileId::Dirt => "dirt".to_string(),
+        }
+    }
+
+    /// Convert string back to TileId
+    pub fn from_string(s: &str) -> Option<TileId> {
+        match s {
+            "grass" => Some(TileId::Grass),
+            "dirt" => Some(TileId::Dirt),
+            _ => None,
+        }
+    }
+}
+
+impl WorldGrid {
+    /// Convert the grid to a save-friendly format (2D array of strings)
+    pub fn to_save_data(&self) -> Vec<Vec<String>> {
+        self.tiles
+            .iter()
+            .map(|row| row.iter().map(|tile| tile.to_string()).collect())
+            .collect()
+    }
+
+    /// Create a WorldGrid from saved data
+    pub fn from_save_data(width: usize, height: usize, tiles: Vec<Vec<String>>) -> Option<Self> {
+        // Validate dimensions
+        if tiles.len() != height {
+            return None;
+        }
+
+        let mut grid_tiles = Vec::new();
+
+        for row in tiles {
+            if row.len() != width {
+                return None;
+            }
+
+            let tile_row: Option<Vec<TileId>> = row
+                .iter()
+                .map(|s| TileId::from_string(s))
+                .collect();
+
+            grid_tiles.push(tile_row?);
+        }
+
+        Some(WorldGrid {
+            tiles: grid_tiles,
+            width,
+            height,
+        })
+    }
+}

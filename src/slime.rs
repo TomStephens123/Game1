@@ -1,8 +1,10 @@
 use crate::animation::AnimationController;
 use crate::collision::{Collidable, CollisionLayer};
+use crate::save::{Saveable, SaveData, SaveError};
 use sdl2::rect::Rect;
 use sdl2::render::Canvas;
 use sdl2::video::Window;
+use serde::{Serialize, Deserialize};
 use std::time::Instant;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -57,6 +59,10 @@ impl<'a> Slime<'a> {
             hitbox_width: 16,    // 16 pixels wide
             hitbox_height: 12,   // 12 pixels tall
         }
+    }
+
+    pub fn set_animation_controller(&mut self, controller: AnimationController<'a>) {
+        self.animation_controller = controller;
     }
 
     pub fn update(&mut self) {
@@ -180,5 +186,88 @@ impl<'a> Collidable for Slime<'a> {
 
     fn get_collision_layer(&self) -> CollisionLayer {
         CollisionLayer::Enemy
+    }
+}
+// ==============================================================================
+// Save/Load Implementation
+// ==============================================================================
+
+impl Saveable for Slime<'_> {
+    fn to_save_data(&self) -> Result<SaveData, SaveError> {
+        #[derive(Serialize)]
+        struct SlimeData {
+            x: i32,
+            y: i32,
+            base_y: i32,
+            health: i32,
+            is_alive: bool,
+            hitbox_offset_x: i32,
+            hitbox_offset_y: i32,
+            hitbox_width: u32,
+            hitbox_height: u32,
+        }
+
+        let slime_data = SlimeData {
+            x: self.x,
+            y: self.y,
+            base_y: self.base_y,
+            health: self.health,
+            is_alive: self.is_alive,
+            hitbox_offset_x: self.hitbox_offset_x,
+            hitbox_offset_y: self.hitbox_offset_y,
+            hitbox_width: self.hitbox_width,
+            hitbox_height: self.hitbox_height,
+        };
+
+        Ok(SaveData {
+            data_type: "slime".to_string(),
+            json_data: serde_json::to_string(&slime_data)?,
+        })
+    }
+
+    fn from_save_data(data: &SaveData) -> Result<Self, SaveError> {
+        #[derive(Deserialize)]
+        struct SlimeData {
+            x: i32,
+            y: i32,
+            base_y: i32,
+            health: i32,
+            is_alive: bool,
+            hitbox_offset_x: i32,
+            hitbox_offset_y: i32,
+            hitbox_width: u32,
+            hitbox_height: u32,
+        }
+
+        if data.data_type != "slime" {
+            return Err(SaveError::CorruptedData(format!(
+                "Expected slime data, got {}",
+                data.data_type
+            )));
+        }
+
+        let slime_data: SlimeData = serde_json::from_str(&data.json_data)?;
+
+        // Create slime with animation controller placeholder
+        // The actual animation controller will be set externally
+        let mut slime = Slime::new(
+            slime_data.x,
+            slime_data.y,
+            AnimationController::new(),
+        );
+
+        // Restore state
+        slime.base_y = slime_data.base_y;
+        slime.health = slime_data.health;
+        slime.is_alive = slime_data.is_alive;
+        slime.hitbox_offset_x = slime_data.hitbox_offset_x;
+        slime.hitbox_offset_y = slime_data.hitbox_offset_y;
+        slime.hitbox_width = slime_data.hitbox_width;
+        slime.hitbox_height = slime_data.hitbox_height;
+
+        // Note: Behavior state and timers are NOT saved
+        // Slimes will start in Idle state with reset timers
+
+        Ok(slime)
     }
 }
