@@ -321,6 +321,7 @@ impl AnimationConfig {
     /// println!("Available animations: {:?}", config.available_states());
     /// // Output: ["idle", "running", "attack"]
     /// ```
+    #[allow(dead_code)] // Reserved for debugging/tooling
     pub fn available_states(&self) -> Vec<String> {
         self.animations.keys().cloned().collect()
     }

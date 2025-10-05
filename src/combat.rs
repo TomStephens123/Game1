@@ -19,6 +19,7 @@ use std::time::Instant;
 ///
 /// Different damage types may be affected by different resistances/defenses
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)] // Magical and True damage reserved for future features
 pub enum DamageType {
     /// Physical damage (affected by defense stat)
     Physical,
@@ -35,6 +36,7 @@ pub enum DamageType {
 /// - AI behavior (retaliate against attacker)
 /// - Visual feedback (different effects per source)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)] // Environment and SelfInflicted reserved for future features
 pub enum DamageSource {
     /// Damage from an enemy entity
     /// In the future, this could store an entity ID
@@ -65,6 +67,7 @@ pub struct DamageEvent {
     /// Type of damage
     pub damage_type: DamageType,
     /// What caused this damage
+    #[allow(dead_code)] // Reserved for future damage tracking features
     pub source: DamageSource,
 }
 
@@ -79,6 +82,7 @@ impl DamageEvent {
     }
 
     /// Creates a new magical damage event
+    #[allow(dead_code)] // Reserved for future magical damage features
     pub fn magical(amount: f32, source: DamageSource) -> Self {
         DamageEvent {
             amount,
@@ -88,6 +92,7 @@ impl DamageEvent {
     }
 
     /// Creates a new true damage event (ignores defenses)
+    #[allow(dead_code)] // Reserved for future true damage features
     pub fn true_damage(amount: f32, source: DamageSource) -> Self {
         DamageEvent {
             amount,
@@ -152,6 +157,7 @@ impl PlayerState {
     }
 
     /// Checks if the player is dead
+    #[allow(dead_code)] // Reserved for future death screen/respawn features
     pub fn is_dead(&self) -> bool {
         matches!(self, PlayerState::Dead { .. })
     }
@@ -159,6 +165,7 @@ impl PlayerState {
     /// Gets the time of death if player is dead
     ///
     /// Returns `None` if player is alive
+    #[allow(dead_code)] // Reserved for future death screen/respawn features
     pub fn death_time(&self) -> Option<Instant> {
         match self {
             PlayerState::Alive => None,
@@ -200,6 +207,7 @@ impl AttackEvent {
     }
 
     /// Converts this attack to a damage event
+    #[allow(dead_code)] // Reserved for future damage type features
     pub fn to_damage_event(&self, damage_type: DamageType, source: DamageSource) -> DamageEvent {
         DamageEvent {
             amount: self.damage,

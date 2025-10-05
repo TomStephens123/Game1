@@ -271,6 +271,7 @@ impl<'a> Player<'a> {
     /// Heals the player
     ///
     /// Returns the actual amount healed (may be less than requested if near max health)
+    #[allow(dead_code)] // Reserved for healing items/abilities
     pub fn heal(&mut self, amount: f32) -> f32 {
         if !self.is_alive() {
             return 0.0;
@@ -280,6 +281,7 @@ impl<'a> Player<'a> {
     }
 
     /// Returns true if the player is alive.
+    #[allow(dead_code)] // Already exposed via state.is_alive()
     pub fn is_alive(&self) -> bool {
         self.stats.health.is_alive()
     }

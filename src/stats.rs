@@ -42,6 +42,7 @@ use std::time::Duration;
 #[derive(Debug, Clone)]
 pub struct Health {
     current: f32,
+    #[allow(dead_code)] // Reserved for health bar display
     max: f32,
 }
 
@@ -52,16 +53,19 @@ impl Health {
     }
 
     /// Returns the current health value
+    #[allow(dead_code)] // Reserved for health bar display
     pub fn current(&self) -> f32 {
         self.current
     }
 
     /// Returns the maximum health value
+    #[allow(dead_code)] // Reserved for health bar display
     pub fn max(&self) -> f32 {
         self.max
     }
 
     /// Returns health as a percentage (0.0 to 1.0)
+    #[allow(dead_code)] // Reserved for health bar display
     pub fn percentage(&self) -> f32 {
         if self.max <= 0.0 {
             0.0
@@ -71,6 +75,7 @@ impl Health {
     }
 
     /// Checks if the entity is alive (health > 0)
+    #[allow(dead_code)] // Already exposed via Stats
     pub fn is_alive(&self) -> bool {
         self.current > 0.0
     }
@@ -120,6 +125,7 @@ impl Health {
     /// assert_eq!(healed, 50.0); // Only healed what was missing
     /// assert_eq!(health.current(), 100.0);
     /// ```
+    #[allow(dead_code)] // Reserved for healing items/abilities
     pub fn heal(&mut self, amount: f32) -> f32 {
         let old_health = self.current;
         self.current = (self.current + amount).min(self.max);
@@ -129,6 +135,7 @@ impl Health {
     /// Sets the maximum health and adjusts current health if needed
     ///
     /// If new max is lower than current health, current health is capped to new max
+    #[allow(dead_code)] // Reserved for level-up/stat boost features
     pub fn set_max(&mut self, new_max: f32) {
         self.max = new_max;
         if self.current > self.max {
@@ -146,10 +153,12 @@ impl Health {
 #[derive(Debug, Clone)]
 pub struct DamageResult {
     /// Actual damage dealt (may be less than requested if target had less health)
+    #[allow(dead_code)] // Reserved for damage number display
     pub damage_dealt: f32,
     /// Whether this damage killed the target
     pub is_fatal: bool,
     /// Excess damage beyond what was needed to kill (0.0 if not fatal)
+    #[allow(dead_code)] // Reserved for damage number display
     pub overkill: f32,
 }
 
@@ -169,6 +178,7 @@ impl DamageResult {
 /// Using an enum ensures we can't accidentally mix up different stat types
 /// when applying modifiers
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(dead_code)] // Reserved for future stat modifier system
 pub enum StatType {
     /// Movement speed in pixels per frame
     MovementSpeed,
@@ -189,6 +199,7 @@ pub enum StatType {
 /// 2. Flat - adds/subtracts a fixed amount
 /// 3. Percentage - multiplies by a factor (0.5 = +50%)
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)] // Reserved for future stat modifier system
 pub enum StatModifier {
     /// Completely replace the stat value
     Override(f32),
@@ -202,6 +213,7 @@ pub enum StatModifier {
 ///
 /// Represents a buff, debuff, or permanent stat change
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Reserved for future stat modifier system
 pub struct ModifierEffect {
     /// Which stat this modifies
     pub stat_type: StatType,
@@ -243,6 +255,7 @@ impl Stats {
     }
 
     /// Gets the base value of a stat (before modifiers)
+    #[allow(dead_code)] // Reserved for future stat modifier system
     fn base_stat(&self, stat_type: StatType) -> f32 {
         match stat_type {
             StatType::MovementSpeed => self.movement_speed,
@@ -284,6 +297,7 @@ impl Stats {
     /// let effective = stats.effective_stat(StatType::AttackDamage, &modifiers);
     /// assert_eq!(effective, 22.5);
     /// ```
+    #[allow(dead_code)] // Reserved for future stat modifier system
     pub fn effective_stat(&self, stat_type: StatType, modifiers: &[ModifierEffect]) -> f32 {
         let base_value = self.base_stat(stat_type);
 
