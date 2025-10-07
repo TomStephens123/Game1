@@ -1,6 +1,7 @@
 use sdl2::event::Event;
 use sdl2::image::LoadTexture;
 use sdl2::keyboard::Keycode;
+use sdl2::pixels::Color;
 
 mod animation;
 mod attack_effect;
@@ -12,6 +13,7 @@ mod slime;
 mod sprite;
 mod stats;
 mod tile;
+mod ui;
 
 use animation::AnimationConfig;
 use attack_effect::AttackEffect;
@@ -24,6 +26,7 @@ use player::Player;
 use save::{SaveManager, SaveFile, SaveMetadata, SaveType, WorldSaveData, EntitySaveData, Saveable, SaveData, CURRENT_SAVE_VERSION};
 use slime::Slime;
 use tile::{TileId, WorldGrid, RenderGrid};
+use ui::{HealthBar, HealthBarStyle};
 use std::time::SystemTime;
 
 // Game resolution constants
@@ -750,6 +753,14 @@ fn main() -> Result<(), String> {
     let mut debug_menu_state = DebugMenuState::Closed;
     let mut debug_config = DebugConfig::new();
 
+    // UI Components: Health bars (world-space HUD)
+    let player_health_bar = HealthBar::new(); // Default green health bar
+    let enemy_health_bar = HealthBar::with_style(HealthBarStyle {
+        health_color: Color::RGB(150, 0, 150), // Purple for enemies
+        low_health_color: Color::RGB(200, 0, 0),
+        ..Default::default()
+    });
+
     // Window boundary collision - invisible walls at screen edges
     // Made 10px thick to reliably catch player hitbox
     let boundary_thickness = 10;
@@ -1233,6 +1244,32 @@ fn main() -> Result<(), String> {
         // Render attack effects (on top of player/slimes to show attack range)
         for effect in &attack_effects {
             effect.render(&mut canvas, SPRITE_SCALE)?;
+        }
+
+        // Render health bars (world-space HUD layer)
+        // Only show health bars if entity is alive
+        if player.state.is_alive() {
+            player_health_bar.render(
+                &mut canvas,
+                player.x,
+                player.y,
+                player.width * SPRITE_SCALE,
+                player.height * SPRITE_SCALE,
+                player.stats.health.percentage(),
+            )?;
+        }
+
+        for slime in &slimes {
+            if slime.is_alive {
+                enemy_health_bar.render(
+                    &mut canvas,
+                    slime.x,
+                    slime.y,
+                    slime.width * SPRITE_SCALE,
+                    slime.height * SPRITE_SCALE,
+                    slime.health as f32 / 8.0, // Slimes have max 8 HP
+                )?;
+            }
         }
 
         // Debug: Render collision boxes (toggle with 'B' key)
