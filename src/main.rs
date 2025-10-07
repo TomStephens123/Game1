@@ -1018,8 +1018,9 @@ fn main() -> Result<(), String> {
                 slimes[slime_index].apply_push(0, overlap_y * 7 / 10);
             }
 
-            // Contact damage: slime touches player (not while attacking)
-            if !player.is_attacking {
+            // Contact damage: slime touches player (not while attacking, and slime must not be invulnerable)
+            // This prevents dying/damaged slimes from dealing damage
+            if !player.is_attacking && !slimes[slime_index].is_invulnerable() {
                 let damage = DamageEvent::physical(debug_config.slime_contact_damage, DamageSource::Enemy);
                 player.take_damage(damage);
             }
