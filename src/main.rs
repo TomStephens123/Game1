@@ -7,11 +7,13 @@ mod animation;
 mod attack_effect;
 mod collision;
 mod combat;
+mod gui;
 mod player;
 mod save;
 mod slime;
 mod sprite;
 mod stats;
+mod text;
 mod tile;
 mod ui;
 
@@ -22,9 +24,11 @@ use collision::{
     StaticCollidable, StaticObject,
 };
 use combat::{DamageEvent, DamageSource};
+use gui::{SaveExitMenu, SaveExitOption, DeathScreen};
 use player::Player;
 use save::{SaveManager, SaveFile, SaveMetadata, SaveType, WorldSaveData, EntitySaveData, Saveable, SaveData, CURRENT_SAVE_VERSION};
 use slime::Slime;
+use text::draw_simple_text;
 use tile::{TileId, WorldGrid, RenderGrid};
 use ui::{HealthBar, HealthBarStyle};
 use std::time::SystemTime;
@@ -39,13 +43,7 @@ const SPRITE_SCALE: u32 = 2;
 enum GameState {
     Playing,
     ExitMenu,
-}
-
-/// Exit menu options
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum ExitMenuOption {
-    SaveAndExit,
-    Cancel,
+    Dead, // New state for death screen
 }
 
 /// Debug menu state
@@ -309,187 +307,9 @@ fn save_game(
 }
 
 /// Simple helper to draw text using a basic 5x7 bitmap font
-fn draw_simple_text(
-    canvas: &mut sdl2::render::Canvas<sdl2::video::Window>,
-    text: &str,
-    x: i32,
-    y: i32,
-    color: sdl2::pixels::Color,
-    scale: u32,
-) -> Result<(), String> {
-    canvas.set_draw_color(color);
+// draw_simple_text has been moved to src/text.rs
 
-    let char_width = 6 * scale;  // 5 pixels + 1 spacing
-    let pixel_size = scale as i32;
-
-    for (i, c) in text.chars().enumerate() {
-        let char_x = x + (i as i32 * char_width as i32);
-
-        // 5x7 bitmap font patterns (1 = pixel on, 0 = pixel off)
-        let pattern: &[u8] = match c.to_ascii_uppercase() {
-            'A' => &[0b01110, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001],
-            'B' => &[0b11110, 0b10001, 0b10001, 0b11110, 0b10001, 0b10001, 0b11110],
-            'C' => &[0b01110, 0b10001, 0b10000, 0b10000, 0b10000, 0b10001, 0b01110],
-            'D' => &[0b11110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b11110],
-            'E' => &[0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b11111],
-            'F' => &[0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b10000],
-            'G' => &[0b01110, 0b10001, 0b10000, 0b10111, 0b10001, 0b10001, 0b01110],
-            'H' => &[0b10001, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001],
-            'I' => &[0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b11111],
-            'J' => &[0b00111, 0b00010, 0b00010, 0b00010, 0b00010, 0b10010, 0b01100],
-            'K' => &[0b10001, 0b10010, 0b10100, 0b11000, 0b10100, 0b10010, 0b10001],
-            'L' => &[0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b11111],
-            'M' => &[0b10001, 0b11011, 0b10101, 0b10001, 0b10001, 0b10001, 0b10001],
-            'N' => &[0b10001, 0b11001, 0b10101, 0b10011, 0b10001, 0b10001, 0b10001],
-            'O' => &[0b01110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110],
-            'P' => &[0b11110, 0b10001, 0b10001, 0b11110, 0b10000, 0b10000, 0b10000],
-            'Q' => &[0b01110, 0b10001, 0b10001, 0b10001, 0b10101, 0b10010, 0b01101],
-            'R' => &[0b11110, 0b10001, 0b10001, 0b11110, 0b10100, 0b10010, 0b10001],
-            'S' => &[0b01110, 0b10001, 0b10000, 0b01110, 0b00001, 0b10001, 0b01110],
-            'T' => &[0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100],
-            'U' => &[0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110],
-            'V' => &[0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01010, 0b00100],
-            'W' => &[0b10001, 0b10001, 0b10001, 0b10001, 0b10101, 0b11011, 0b10001],
-            'X' => &[0b10001, 0b10001, 0b01010, 0b00100, 0b01010, 0b10001, 0b10001],
-            'Y' => &[0b10001, 0b10001, 0b01010, 0b00100, 0b00100, 0b00100, 0b00100],
-            'Z' => &[0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0b11111],
-            '0' => &[0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110],
-            '1' => &[0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110],
-            '2' => &[0b01110, 0b10001, 0b00001, 0b00110, 0b01000, 0b10000, 0b11111],
-            '3' => &[0b11111, 0b00010, 0b00100, 0b00010, 0b00001, 0b10001, 0b01110],
-            '4' => &[0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010],
-            '5' => &[0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110],
-            '6' => &[0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110],
-            '7' => &[0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000],
-            '8' => &[0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110],
-            '9' => &[0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100],
-            ':' => &[0b00000, 0b00000, 0b00100, 0b00000, 0b00100, 0b00000, 0b00000],
-            '/' => &[0b00001, 0b00010, 0b00010, 0b00100, 0b01000, 0b01000, 0b10000],
-            '<' => &[0b00010, 0b00100, 0b01000, 0b10000, 0b01000, 0b00100, 0b00010],
-            '>' => &[0b01000, 0b00100, 0b00010, 0b00001, 0b00010, 0b00100, 0b01000],
-            '-' => &[0b00000, 0b00000, 0b00000, 0b11111, 0b00000, 0b00000, 0b00000],
-            '+' => &[0b00000, 0b00100, 0b00100, 0b11111, 0b00100, 0b00100, 0b00000],
-            '.' => &[0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b01100, 0b01100],
-            '!' => &[0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00000, 0b00100],
-            '(' => &[0b00010, 0b00100, 0b01000, 0b01000, 0b01000, 0b00100, 0b00010],
-            ')' => &[0b01000, 0b00100, 0b00010, 0b00010, 0b00010, 0b00100, 0b01000],
-            ' ' => &[0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000],
-            _ => &[0b11111, 0b11111, 0b11111, 0b11111, 0b11111, 0b11111, 0b11111], // Full block for unknown
-        };
-
-        // Draw the character pixel by pixel
-        for (row, &pattern_row) in pattern.iter().enumerate() {
-            for col in 0..5 {
-                if (pattern_row >> (4 - col)) & 1 == 1 {
-                    canvas.fill_rect(sdl2::rect::Rect::new(
-                        char_x + (col * pixel_size),
-                        y + (row as i32 * pixel_size),
-                        scale,
-                        scale,
-                    ))?;
-                }
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Render the exit menu overlay
-fn render_exit_menu(
-    canvas: &mut sdl2::render::Canvas<sdl2::video::Window>,
-    selected_option: ExitMenuOption,
-) -> Result<(), String> {
-    // Semi-transparent overlay (need to enable blend mode)
-    canvas.set_blend_mode(sdl2::render::BlendMode::Blend);
-    canvas.set_draw_color(sdl2::pixels::Color::RGBA(0, 0, 0, 180));
-    canvas.fill_rect(None)?;
-    canvas.set_blend_mode(sdl2::render::BlendMode::None);
-
-    // Draw menu box
-    let menu_width = 500;
-    let menu_height = 240;
-    let menu_x = (GAME_WIDTH - menu_width) / 2;
-    let menu_y = (GAME_HEIGHT - menu_height) / 2;
-
-    // Menu background
-    canvas.set_draw_color(sdl2::pixels::Color::RGB(30, 30, 40));
-    canvas.fill_rect(sdl2::rect::Rect::new(
-        menu_x as i32,
-        menu_y as i32,
-        menu_width,
-        menu_height,
-    ))?;
-
-    // Menu border (double border for better visibility)
-    canvas.set_draw_color(sdl2::pixels::Color::RGB(100, 100, 120));
-    canvas.draw_rect(sdl2::rect::Rect::new(
-        menu_x as i32,
-        menu_y as i32,
-        menu_width,
-        menu_height,
-    ))?;
-    canvas.draw_rect(sdl2::rect::Rect::new(
-        (menu_x + 2) as i32,
-        (menu_y + 2) as i32,
-        menu_width - 4,
-        menu_height - 4,
-    ))?;
-
-    // Title
-    draw_simple_text(
-        canvas,
-        "EXIT",
-        (menu_x + 210) as i32,
-        (menu_y + 30) as i32,
-        sdl2::pixels::Color::RGB(220, 220, 240),
-        3,
-    )?;
-
-    // Option positions
-    let option_height = 60;
-    let option_start_y = menu_y + 100;
-
-    // Define options (only 2 options now)
-    let options = [
-        ("SAVE AND EXIT", ExitMenuOption::SaveAndExit),
-        ("CANCEL", ExitMenuOption::Cancel),
-    ];
-
-    for (i, (text, option)) in options.iter().enumerate() {
-        let option_y = option_start_y + (i as u32 * option_height);
-        let is_selected = *option == selected_option;
-
-        // Draw selection highlight
-        if is_selected {
-            canvas.set_draw_color(sdl2::pixels::Color::RGB(80, 100, 140));
-            canvas.fill_rect(sdl2::rect::Rect::new(
-                (menu_x + 15) as i32,
-                option_y as i32 - 3,
-                menu_width - 30,
-                36,
-            ))?;
-        }
-
-        // Draw option text (centered, larger)
-        let text_color = if is_selected {
-            sdl2::pixels::Color::RGB(255, 255, 255)
-        } else {
-            sdl2::pixels::Color::RGB(160, 160, 170)
-        };
-
-        draw_simple_text(
-            canvas,
-            text,
-            (menu_x + 80) as i32,
-            option_y as i32,
-            text_color,
-            3,
-        )?;
-    }
-
-    Ok(())
-}
+// render_exit_menu has been replaced by SaveExitMenu component in src/gui/
 
 /// Render the debug stats menu overlay
 fn render_debug_menu(
@@ -504,9 +324,9 @@ fn render_debug_menu(
     canvas.fill_rect(None)?;
     canvas.set_blend_mode(sdl2::render::BlendMode::None);
 
-    // Menu box dimensions
-    let menu_width = 400;
-    let menu_height = 280;
+    // Menu box dimensions (scaled for 640x360 viewport)
+    let menu_width = 380;
+    let menu_height = 260;
     let menu_x = (GAME_WIDTH - menu_width) / 2;
     let menu_y = (GAME_HEIGHT - menu_height) / 2;
 
@@ -534,21 +354,21 @@ fn render_debug_menu(
         menu_height - 4,
     ))?;
 
-    // Title
+    // Title (centered)
     draw_simple_text(
         canvas,
         "DEBUG STATS",
-        (menu_x + 120) as i32,
+        (menu_x + 110) as i32,
         (menu_y + 15) as i32,
         sdl2::pixels::Color::RGB(180, 220, 255),
         2,
     )?;
 
-    // Subtitle
+    // Subtitle (centered)
     draw_simple_text(
         canvas,
         "F3 TO CLOSE",
-        (menu_x + 140) as i32,
+        (menu_x + 130) as i32,
         (menu_y + 35) as i32,
         sdl2::pixels::Color::RGB(120, 140, 160),
         1,
@@ -747,7 +567,6 @@ fn main() -> Result<(), String> {
 
     // Game state for menu handling
     let mut game_state = GameState::Playing;
-    let mut exit_menu_selection = ExitMenuOption::SaveAndExit;
 
     // Debug menu state
     let mut debug_menu_state = DebugMenuState::Closed;
@@ -760,6 +579,10 @@ fn main() -> Result<(), String> {
         low_health_color: Color::RGB(200, 0, 0),
         ..Default::default()
     });
+
+    // GUI Components: Screen-space menus
+    let mut save_exit_menu = SaveExitMenu::new();
+    let mut death_screen = DeathScreen::new();
 
     // Window boundary collision - invisible walls at screen edges
     // Made 10px thick to reliably catch player hitbox
@@ -810,11 +633,15 @@ fn main() -> Result<(), String> {
                         GameState::Playing => {
                             // Open exit menu
                             game_state = GameState::ExitMenu;
-                            exit_menu_selection = ExitMenuOption::SaveAndExit;
                         }
                         GameState::ExitMenu => {
                             // Close menu (Cancel)
                             game_state = GameState::Playing;
+                        }
+                        GameState::Dead => {
+                            // Allow opening exit menu during death
+                            game_state = GameState::ExitMenu;
+                            death_screen.reset();
                         }
                     }
                 }
@@ -822,32 +649,26 @@ fn main() -> Result<(), String> {
                     keycode: Some(Keycode::Up),
                     ..
                 } if game_state == GameState::ExitMenu => {
-                    exit_menu_selection = match exit_menu_selection {
-                        ExitMenuOption::SaveAndExit => ExitMenuOption::Cancel,
-                        ExitMenuOption::Cancel => ExitMenuOption::SaveAndExit,
-                    };
+                    save_exit_menu.navigate_up();
                 }
                 Event::KeyDown {
                     keycode: Some(Keycode::Down),
                     ..
                 } if game_state == GameState::ExitMenu => {
-                    exit_menu_selection = match exit_menu_selection {
-                        ExitMenuOption::SaveAndExit => ExitMenuOption::Cancel,
-                        ExitMenuOption::Cancel => ExitMenuOption::SaveAndExit,
-                    };
+                    save_exit_menu.navigate_down();
                 }
                 Event::KeyDown {
                     keycode: Some(Keycode::Return | Keycode::Space),
                     ..
                 } if game_state == GameState::ExitMenu => {
-                    match exit_menu_selection {
-                        ExitMenuOption::SaveAndExit => {
+                    match save_exit_menu.selected_option() {
+                        SaveExitOption::SaveAndExit => {
                             if let Err(e) = save_game(&mut save_manager, &player, &slimes, &world_grid) {
                                 eprintln!("Failed to save: {}", e);
                             }
                             break 'running;
                         }
-                        ExitMenuOption::Cancel => {
+                        SaveExitOption::Cancel => {
                             game_state = GameState::Playing;
                         }
                     }
@@ -1110,6 +931,13 @@ fn main() -> Result<(), String> {
 
         // Only update game state when not in menu
         if game_state == GameState::Playing {
+            // Check for player death
+            if player.state.is_dead() {
+                game_state = GameState::Dead;
+                death_screen.trigger();
+                println!("Player died!");
+            }
+
             // Update player
             let keyboard_state = event_pump.keyboard_state();
             player.update(&keyboard_state);
@@ -1141,6 +969,17 @@ fn main() -> Result<(), String> {
             // after invulnerability checks, preventing same-frame hits
             for slime in &mut slimes {
                 slime.update();
+            }
+        }
+
+        // Check for respawn after death timer expires
+        if game_state == GameState::Dead {
+            if death_screen.should_respawn() {
+                // Respawn at world center
+                player.respawn(GAME_WIDTH as i32 / 2, GAME_HEIGHT as i32 / 2);
+                death_screen.reset();
+                game_state = GameState::Playing;
+                println!("Player respawned!");
             }
         }
 
@@ -1347,9 +1186,14 @@ fn main() -> Result<(), String> {
             );
         }
 
-        // Render exit menu if active
+        // Render death screen if dead
+        if game_state == GameState::Dead {
+            death_screen.render(&mut canvas)?;
+        }
+
+        // Render exit menu if active (can be shown over death screen)
         if game_state == GameState::ExitMenu {
-            render_exit_menu(&mut canvas, exit_menu_selection)?;
+            save_exit_menu.render(&mut canvas)?;
         }
 
         // Render debug menu if active

@@ -265,6 +265,49 @@ impl<'a> Player<'a> {
         };
     }
 
+    /// Respawns the player at a specific position with full health
+    ///
+    /// This method is called after the death screen timer expires. It:
+    /// - Restores full health
+    /// - Resets player state to Alive
+    /// - Clears combat state (attacking, taking damage)
+    /// - Resets invulnerability
+    /// - Moves player to the respawn position
+    /// - Stops player movement
+    ///
+    /// # Parameters
+    /// - `x`, `y`: The respawn position in world coordinates
+    ///
+    /// # Example
+    /// ```rust
+    /// // Respawn at world center after death
+    /// player.respawn(GAME_WIDTH as i32 / 2, GAME_HEIGHT as i32 / 2);
+    /// ```
+    pub fn respawn(&mut self, x: i32, y: i32) {
+        // Restore health to full
+        let max_health = self.stats.max_health;
+        self.stats.health.heal(max_health);
+
+        // Reset state
+        self.state = PlayerState::Alive;
+
+        // Clear combat state
+        self.is_attacking = false;
+        self.is_taking_damage = false;
+
+        // Reset invulnerability
+        self.is_invulnerable = false;
+        self.invulnerability_timer = Instant::now();
+
+        // Reset position
+        self.x = x;
+        self.y = y;
+        self.velocity_x = 0;
+        self.velocity_y = 0;
+
+        println!("Player respawned at ({}, {}) with full health", x, y);
+    }
+
     /// Heals the player
     ///
     /// Returns the actual amount healed (may be less than requested if near max health)
