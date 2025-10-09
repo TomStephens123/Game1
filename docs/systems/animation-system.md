@@ -8,6 +8,53 @@ The animation system is a flexible, data-driven framework for managing sprite-ba
 
 The animation system has been significantly improved for better extensibility and ease of use:
 
+### **LATEST: Manual Frame Control (NEW!)**
+**Date:** 2025-10-09
+
+The animation system now supports manual frame control, allowing precise control over which frame is displayed. This is essential for non-timer-based animations like the Entity awakening feature.
+
+**New Features:**
+1. **Manual Frame Setting**: `set_frame(frame_index)` - Jump to any frame directly
+2. **Frame Access**: `get_current_frame()` - Query current frame index
+3. **Frame Count**: `frame_count()` - Get total frame count
+4. **Pause/Resume**: `pause()` and `play()` - Control playback state
+5. **Playback Query**: `is_playing()` - Check if animation is running
+
+**Use Cases:**
+- **Manual frame progression**: Advance frames based on game events rather than timers
+- **Frame-perfect animations**: Synchronize animations with external logic
+- **Animation scrubbing**: Preview animations by manually setting frames
+- **State persistence**: Save/load exact animation frame for game saves
+
+**Example Usage:**
+```rust
+// Pause automatic playback
+sprite_sheet.pause();
+
+// Manually control frames
+for i in 0..sprite_sheet.frame_count() {
+    sprite_sheet.set_frame(i);
+    // Render current frame...
+}
+
+// Resume automatic playback
+sprite_sheet.play();
+
+// Query state
+if sprite_sheet.is_playing() {
+    println!("Currently on frame {}", sprite_sheet.get_current_frame());
+}
+```
+
+**Safety Features:**
+- Bounds checking prevents crashes (frames clamped to valid range)
+- Frame timer resets on manual frame changes (prevents unexpected auto-advance)
+- Manual control works alongside automatic playback modes
+
+See: `/Users/tomstephens/Documents/GitHub/Game1/src/sprite.rs` lines 68-155
+
+---
+
 ### 1. String-Based Animation States
 **What Changed:** Animation states are now `String` instead of a global enum.
 

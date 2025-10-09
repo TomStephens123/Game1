@@ -9,11 +9,13 @@ mod collision;
 mod combat;
 mod gui;
 mod player;
+mod render;
 mod save;
 mod slime;
 mod sprite;
 mod stats;
 mod text;
+mod the_entity;
 mod tile;
 mod ui;
 
@@ -26,12 +28,15 @@ use collision::{
 use combat::{DamageEvent, DamageSource};
 use gui::{SaveExitMenu, SaveExitOption, DeathScreen};
 use player::Player;
+use render::render_with_depth_sorting;
 use save::{SaveManager, SaveFile, SaveMetadata, SaveType, WorldSaveData, EntitySaveData, Saveable, SaveData, CURRENT_SAVE_VERSION};
 use slime::Slime;
 use text::draw_simple_text;
+use the_entity::{TheEntity, EntityState};
 use tile::{TileId, WorldGrid, RenderGrid};
 use ui::{HealthBar, HealthBarStyle};
 use std::time::SystemTime;
+use serde::Deserialize;
 
 // Game resolution constants
 const GAME_WIDTH: u32 = 640;
@@ -158,7 +163,8 @@ fn load_game<'a>(
     slime_config: &AnimationConfig,
     character_texture: &'a sdl2::render::Texture<'a>,
     slime_texture: &'a sdl2::render::Texture<'a>,
-) -> Result<(Player<'a>, Vec<Slime<'a>>, WorldGrid), String> {
+    entity_texture: &'a sdl2::render::Texture<'a>,
+) -> Result<(Player<'a>, Vec<Slime<'a>>, WorldGrid, Vec<TheEntity<'a>>), String> {
     // Load save file from slot 1
     let save_file = save_manager.load_game(1)
         .map_err(|e| format!("Failed to load save: {}", e))?;
@@ -179,6 +185,7 @@ fn load_game<'a>(
     // Load entities
     let mut player: Option<Player> = None;
     let mut slimes: Vec<Slime> = Vec::new();
+    let mut loaded_entities: Vec<TheEntity> = Vec::new();
 
     for entity_data in save_file.entities {
         match entity_data.entity_type.as_str() {
@@ -221,6 +228,39 @@ fn load_game<'a>(
                 loaded_slime.set_animation_controller(slime_animation_controller);
                 slimes.push(loaded_slime);
             }
+            "the_entity" => {
+                // Manually deserialize entity since it needs texture setup
+                #[derive(Deserialize)]
+                struct EntitySaveData {
+                    id: usize,
+                    x: i32,
+                    y: i32,
+                    state: EntityState,
+                    awakening_frame: usize,
+                    inactivity_timer: f32,
+                }
+
+                let saved_entity: EntitySaveData = serde_json::from_str(&entity_data.data)
+                    .map_err(|e| format!("Failed to deserialize entity: {}", e))?;
+
+                // Create sprite sheet with all 13 frames
+                let mut frames = Vec::new();
+                for i in 0..13 {
+                    frames.push(sprite::Frame::new(i * 32, 0, 32, 32, 100));
+                }
+                let sprite_sheet = sprite::SpriteSheet::new(entity_texture, frames);
+
+                // Create entity and restore state
+                let mut loaded_entity = TheEntity::new(saved_entity.id, saved_entity.x, saved_entity.y, sprite_sheet);
+                loaded_entity.state = saved_entity.state;
+                loaded_entity.awakening_frame = saved_entity.awakening_frame;
+                loaded_entity.inactivity_timer = saved_entity.inactivity_timer;
+
+                // Update sprite frame to match restored state
+                loaded_entity.update_sprite_frame();
+
+                loaded_entities.push(loaded_entity);
+            }
             unknown => {
                 eprintln!("Warning: Unknown entity type '{}', skipping", unknown);
             }
@@ -229,9 +269,10 @@ fn load_game<'a>(
 
     let player = player.ok_or_else(|| "No player found in save file".to_string())?;
     println!("  - Loaded {} slimes", slimes.len());
+    println!("  - Loaded {} entities", loaded_entities.len());
     println!("✓ Game loaded successfully!");
 
-    Ok((player, slimes, world_grid))
+    Ok((player, slimes, world_grid, loaded_entities))
 }
 
 /// Save the current game state
@@ -240,15 +281,16 @@ fn save_game(
     player: &Player,
     slimes: &[Slime],
     world_grid: &WorldGrid,
+    the_entities: &[TheEntity],
 ) -> Result<(), String> {
     // Collect entity save data
-    let mut entities = Vec::new();
+    let mut entities_vec = Vec::new();
 
     // Save player (entity_id = 0)
     let player_save_data = player.to_save_data()
         .map_err(|e| format!("Failed to save player: {}", e))?;
 
-    entities.push(EntitySaveData {
+    entities_vec.push(EntitySaveData {
         entity_id: 0,
         entity_type: "player".to_string(),
         position: player.position(),
@@ -256,15 +298,30 @@ fn save_game(
     });
 
     // Save slimes (entity_id starts from 1)
+    let mut next_id = 1;
     for (i, slime) in slimes.iter().enumerate() {
         let slime_save_data = slime.to_save_data()
             .map_err(|e| format!("Failed to save slime {}: {}", i, e))?;
 
-        entities.push(EntitySaveData {
-            entity_id: (i + 1) as u64,
+        entities_vec.push(EntitySaveData {
+            entity_id: (next_id + i) as u64,
             entity_type: "slime".to_string(),
             position: (slime.x, slime.y),
             data: slime_save_data.json_data,
+        });
+    }
+    next_id += slimes.len();
+
+    // Save entities (TheEntity pyramids)
+    for entity in the_entities.iter() {
+        let entity_save_data = entity.to_save_data()
+            .map_err(|e| format!("Failed to save entity {}: {}", entity.id, e))?;
+
+        entities_vec.push(EntitySaveData {
+            entity_id: (next_id + entity.id) as u64,
+            entity_type: "the_entity".to_string(),
+            position: (entity.x, entity.y),
+            data: entity_save_data.json_data,
         });
     }
 
@@ -276,8 +333,9 @@ fn save_game(
     };
 
     // Save counts for debug output
-    let entity_count = entities.len();
-    let slime_count = entities.len() - 1;
+    let entity_count = entities_vec.len();
+    let slime_count = slimes.len();
+    let entity_pyramid_count = the_entities.len();
     let world_width = world_state.width;
     let world_height = world_state.height;
 
@@ -293,7 +351,7 @@ fn save_game(
             save_slot: save_manager.get_save_slot(),
         },
         world_state,
-        entities,
+        entities: entities_vec,
     };
 
     // Save to file
@@ -301,14 +359,12 @@ fn save_game(
         .map_err(|e| format!("Save failed: {}", e))?;
 
     println!("✓ Game saved successfully!");
-    println!("  - Saved {} entities ({} slimes)", entity_count, slime_count);
+    println!("  - Saved {} entities ({} slimes, {} pyramids)", entity_count, slime_count, entity_pyramid_count);
     println!("  - Saved world: {}x{} tiles", world_width, world_height);
     Ok(())
 }
 
-/// Simple helper to draw text using a basic 5x7 bitmap font
-// draw_simple_text has been moved to src/text.rs
-
+// Simple helper draw_simple_text has been moved to src/text.rs
 // render_exit_menu has been replaced by SaveExitMenu component in src/gui/
 
 /// Render the debug stats menu overlay
@@ -537,13 +593,16 @@ fn main() -> Result<(), String> {
     let mut save_manager = SaveManager::new(&save_dir)
         .map_err(|e| format!("Failed to create save manager: {}", e))?;
 
+    // Load entity texture
+    let entity_texture = load_texture(&texture_creator, "assets/sprites/the_entity/entity_awaken.png")?;
+
     // Try to load existing save on startup
-    let (mut player, mut slimes, mut world_grid, mut render_grid) =
-        match load_game(&save_manager, &player_config, &slime_config, &character_texture, &slime_texture) {
-            Ok((loaded_player, loaded_slimes, loaded_world)) => {
+    let (mut player, mut slimes, mut world_grid, mut render_grid, mut entities) =
+        match load_game(&save_manager, &player_config, &slime_config, &character_texture, &slime_texture, &entity_texture) {
+            Ok((loaded_player, loaded_slimes, loaded_world, loaded_entities)) => {
                 println!("✓ Loaded existing save!");
                 let loaded_render_grid = RenderGrid::new(&loaded_world);
-                (loaded_player, loaded_slimes, loaded_world, loaded_render_grid)
+                (loaded_player, loaded_slimes, loaded_world, loaded_render_grid, loaded_entities)
             }
             Err(_) => {
                 // No save exists, create new game
@@ -561,7 +620,25 @@ fn main() -> Result<(), String> {
                 let new_world_grid = WorldGrid::new(40, 24, TileId::Grass);
                 let new_render_grid = RenderGrid::new(&new_world_grid);
 
-                (new_player, Vec::new(), new_world_grid, new_render_grid)
+                // Spawn 4 entities at fixed locations for new game
+                let entity_spawn_locations = [
+                    (160, 120),   // Top-left quadrant
+                    (480, 120),   // Top-right quadrant
+                    (160, 240),   // Bottom-left quadrant
+                    (480, 240),   // Bottom-right quadrant
+                ];
+
+                let mut new_entities: Vec<TheEntity> = Vec::new();
+                for (id, (x, y)) in entity_spawn_locations.iter().enumerate() {
+                    let mut frames = Vec::new();
+                    for i in 0..13 {
+                        frames.push(sprite::Frame::new(i * 32, 0, 32, 32, 100));
+                    }
+                    let sprite_sheet = sprite::SpriteSheet::new(&entity_texture, frames);
+                    new_entities.push(TheEntity::new(id, *x, *y, sprite_sheet));
+                }
+
+                (new_player, Vec::new(), new_world_grid, new_render_grid, new_entities)
             }
         };
 
@@ -663,7 +740,7 @@ fn main() -> Result<(), String> {
                 } if game_state == GameState::ExitMenu => {
                     match save_exit_menu.selected_option() {
                         SaveExitOption::SaveAndExit => {
-                            if let Err(e) = save_game(&mut save_manager, &player, &slimes, &world_grid) {
+                            if let Err(e) = save_game(&mut save_manager, &player, &slimes, &world_grid, &entities) {
                                 eprintln!("Failed to save: {}", e);
                             }
                             break 'running;
@@ -678,7 +755,7 @@ fn main() -> Result<(), String> {
                     ..
                 } if game_state == GameState::Playing => {
                     // Quick save
-                    if let Err(e) = save_game(&mut save_manager, &player, &slimes, &world_grid) {
+                    if let Err(e) = save_game(&mut save_manager, &player, &slimes, &world_grid, &entities) {
                         eprintln!("Failed to save: {}", e);
                     }
                 }
@@ -687,12 +764,13 @@ fn main() -> Result<(), String> {
                     ..
                 } if game_state == GameState::Playing => {
                     // Load game
-                    match load_game(&save_manager, &player_config, &slime_config, &character_texture, &slime_texture) {
-                        Ok((loaded_player, loaded_slimes, loaded_world)) => {
+                    match load_game(&save_manager, &player_config, &slime_config, &character_texture, &slime_texture, &entity_texture) {
+                        Ok((loaded_player, loaded_slimes, loaded_world, loaded_entities)) => {
                             player = loaded_player;
                             slimes = loaded_slimes;
                             world_grid = loaded_world;
                             render_grid = RenderGrid::new(&world_grid);
+                            entities = loaded_entities;
                             attack_effects.clear();
                             active_attack = None;
                             println!("✓ Game loaded successfully!");
@@ -960,6 +1038,11 @@ fn main() -> Result<(), String> {
                     }
                 }
 
+                // Check entity hits
+                for entity in &mut entities {
+                    entity.check_hit(&attack_hitbox);
+                }
+
                 // Clear attack after processing (attacks are one-frame)
                 active_attack = None;
             }
@@ -969,6 +1052,13 @@ fn main() -> Result<(), String> {
             // after invulnerability checks, preventing same-frame hits
             for slime in &mut slimes {
                 slime.update();
+            }
+
+            // Update entities
+            // Delta time approximation for ~60 FPS
+            let delta_time = 1.0 / 60.0;
+            for entity in &mut entities {
+                entity.update(delta_time);
             }
         }
 
@@ -1060,26 +1150,10 @@ fn main() -> Result<(), String> {
         // Render tile world
         render_grid.render(&mut canvas, &grass_tile_texture)?;
 
-        // Render static objects (simple gray rectangles for now)
-        // Temporarily commented out to see tiles
-        // canvas.set_draw_color(sdl2::pixels::Color::RGB(100, 100, 100));
-        // for static_obj in &static_objects {
-        //     let rect = sdl2::rect::Rect::new(
-        //         static_obj.x,
-        //         static_obj.y,
-        //         static_obj.width,
-        //         static_obj.height,
-        //     );
-        //     canvas.fill_rect(rect).map_err(|e| e.to_string())?;
-        // }
-
-        // Render player
-        player.render(&mut canvas)?;
-
-        // Render slimes
-        for slime in &slimes {
-            slime.render(&mut canvas)?;
-        }
+        // Render all entities with depth sorting
+        // This ensures entities layer correctly based on their Y position
+        // (entities farther back render first, creating proper 2.5D depth)
+        render_with_depth_sorting(&mut canvas, &player, &slimes, &static_objects, &entities)?;
 
         // Render attack effects (on top of player/slimes to show attack range)
         for effect in &attack_effects {

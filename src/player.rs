@@ -1,6 +1,7 @@
 use crate::animation::{AnimationController, AnimationState, Direction, determine_animation_state};
 use crate::collision::{Collidable, CollisionLayer};
 use crate::combat::{AttackEvent, DamageEvent, PlayerState, calculate_damage_with_defense};
+use crate::render::DepthSortable;
 use crate::save::{Saveable, SaveData, SaveError};
 use crate::stats::{Stats, DamageResult};
 use sdl2::keyboard::Scancode;
@@ -369,6 +370,32 @@ impl<'a> Collidable for Player<'a> {
 
     fn get_collision_layer(&self) -> CollisionLayer {
         CollisionLayer::Player
+    }
+}
+
+// ==============================================================================
+// Depth Sorting Render System
+// ==============================================================================
+
+/// Implementation of depth sorting for the Player.
+///
+/// The player's depth is determined by the bottom of their sprite (feet/base).
+/// This ensures proper visual layering in the 2.5D game world.
+///
+/// See docs/systems/depth-sorting-render-system.md for design documentation.
+impl DepthSortable for Player<'_> {
+    fn get_depth_y(&self) -> i32 {
+        // Player's anchor point is at the bottom of the sprite
+        // This is where the player "touches the ground" visually
+        // Sprite height is scaled by SPRITE_SCALE (2x)
+        const SPRITE_SCALE: u32 = 2;
+        self.y + (self.height * SPRITE_SCALE) as i32
+    }
+
+    fn render(&self, canvas: &mut Canvas<Window>) -> Result<(), String> {
+        // Delegate to existing render implementation
+        // This avoids code duplication and keeps the existing render logic intact
+        Player::render(self, canvas)
     }
 }
 

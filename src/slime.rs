@@ -1,5 +1,6 @@
 use crate::animation::AnimationController;
 use crate::collision::{Collidable, CollisionLayer};
+use crate::render::DepthSortable;
 use crate::save::{Saveable, SaveData, SaveError};
 use sdl2::rect::Rect;
 use sdl2::render::Canvas;
@@ -219,8 +220,37 @@ impl<'a> Slime<'a> {
     }
 }
 
+// ==============================================================================
+// Depth Sorting Render System
+// ==============================================================================
+
+/// Implementation of depth sorting for Slime.
+///
+/// The slime's depth is determined by its base Y-coordinate (where it touches ground).
+/// We use base_y rather than y to ensure consistent depth even when jumping.
+///
+/// See docs/systems/depth-sorting-render-system.md for design documentation.
+impl DepthSortable for Slime<'_> {
+    fn get_depth_y(&self) -> i32 {
+        // Slime's anchor point is at the base (bottom of sprite when on ground)
+        // Use base_y to ensure consistent depth during jump animation
+        // The visual Y position (self.y) changes during jumps, but the slime's
+        // depth in the scene should remain constant
+        const SPRITE_SCALE: u32 = 2;
+        self.base_y + (self.height * SPRITE_SCALE) as i32
+    }
+
+    fn render(&self, canvas: &mut Canvas<Window>) -> Result<(), String> {
+        // Delegate to existing render implementation
+        // This avoids code duplication and keeps the existing render logic intact
+        Slime::render(self, canvas)
+    }
+}
+
+// ==============================================================================
 // Collision System Implementation
-//
+// ==============================================================================
+
 // This trait implementation makes Slime participate in the collision system.
 // Important: Collision bounds use the slime's current Y position (which changes during jumps)
 // rather than base_y, so collision detection works correctly mid-jump.

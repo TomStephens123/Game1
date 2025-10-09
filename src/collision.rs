@@ -15,7 +15,10 @@
 /// - **Trait-based design**: Shared behavior across different entity types
 /// - **Enums for categorization**: Type-safe collision layer system
 /// - **Pure functions**: Stateless collision detection logic
+use crate::render::DepthSortable;
 use sdl2::rect::Rect;
+use sdl2::render::Canvas;
+use sdl2::video::Window;
 
 /// Represents different categories of collidable objects.
 ///
@@ -263,6 +266,32 @@ impl StaticObject {
 impl StaticCollidable for StaticObject {
     fn get_bounds(&self) -> Rect {
         Rect::new(self.x, self.y, self.width, self.height)
+    }
+}
+
+/// Implementation of depth sorting for StaticObject.
+///
+/// Static objects use their Y-coordinate as the anchor point for depth sorting.
+/// This is a simple implementation for basic static obstacles (boundary walls, etc.).
+///
+/// Note: For more complex static objects like trees or buildings with visual sprites,
+/// you would want a more sophisticated StaticObject struct with sprite_height and
+/// render methods. See docs/systems/depth-sorting-render-system.md for details.
+impl DepthSortable for StaticObject {
+    fn get_depth_y(&self) -> i32 {
+        // For simple static objects, the anchor is at the Y position
+        // More complex objects would calculate based on sprite_height
+        self.y
+    }
+
+    fn render(&self, _canvas: &mut Canvas<Window>) -> Result<(), String> {
+        // Simple static objects (like boundary walls) don't render visually
+        // They only exist for collision detection
+        // More complex static objects (trees, rocks) would have sprite rendering here
+
+        // For now, return Ok without rendering anything
+        // This prevents invisible boundary walls from appearing in the depth-sorted render
+        Ok(())
     }
 }
 
