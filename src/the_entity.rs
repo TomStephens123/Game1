@@ -43,6 +43,15 @@ use std::time::Instant;
 /// Scale factor for sprite rendering (imported from main)
 const SPRITE_SCALE: u32 = 2;
 
+/// Type of buff provided by this entity when awake.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum EntityType {
+    Attack,       // +1 attack damage
+    Defense,      // +1 defense
+    Speed,        // +1 movement speed
+    Regeneration, // +2 HP every 5 seconds
+}
+
 /// State machine for The Entity's awakening lifecycle.
 ///
 /// # State Descriptions
@@ -111,9 +120,12 @@ pub struct TheEntity<'a> {
 
     // Animation
     sprite_sheet: SpriteSheet<'a>,
+    awake_animation_frame: usize,   // Current frame in awake loop (8-12)
+    awake_animation_timer: f32,      // Timer for awake frame advancement
 
     // Identification
     pub id: usize,
+    pub entity_type: EntityType,  // What buff this entity provides when awake
 }
 
 impl<'a> TheEntity<'a> {
@@ -123,6 +135,7 @@ impl<'a> TheEntity<'a> {
     ///
     /// - `id`: Unique identifier for this entity (0-3)
     /// - `x, y`: World position in pixels (anchor at base)
+    /// - `entity_type`: What buff this entity provides when awake
     /// - `sprite_sheet`: Pre-configured sprite sheet with 13 frames
     ///
     /// # Initial State
@@ -135,7 +148,7 @@ impl<'a> TheEntity<'a> {
     /// let entity = TheEntity::new(0, 320, 200, sprite_sheet);
     /// assert_eq!(entity.state, EntityState::Dormant);
     /// ```
-    pub fn new(id: usize, x: i32, y: i32, sprite_sheet: SpriteSheet<'a>) -> Self {
+    pub fn new(id: usize, x: i32, y: i32, entity_type: EntityType, sprite_sheet: SpriteSheet<'a>) -> Self {
         let mut entity = TheEntity {
             x,
             y,
@@ -148,7 +161,10 @@ impl<'a> TheEntity<'a> {
             reverse_timer: 0.0,
             inactivity_timer: 0.0,
             sprite_sheet,
+            awake_animation_frame: 8,  // Start at frame 8 (frame 9 in spec)
+            awake_animation_timer: 0.0,
             id,
+            entity_type,
         };
 
         // Initialize sprite to dormant state (frame 0 in sprite sheet = frame 1 in spec)
@@ -195,9 +211,10 @@ impl<'a> TheEntity<'a> {
                     self.state = EntityState::Awake;
                     self.inactivity_timer = 0.0;
 
-                    // Start the awake looping animation (frames 7-12 in sprite sheet)
-                    self.sprite_sheet.play();
-                    self.sprite_sheet.set_frame(7); // Frame 8 in spec = index 7
+                    // Start the awake looping animation (frames 8-12, manually controlled)
+                    self.awake_animation_frame = 8;  // Start at frame 8
+                    self.awake_animation_timer = 0.0;
+                    self.update_sprite_frame();
                 }
 
                 self.update_sprite_frame();
@@ -272,6 +289,18 @@ impl<'a> TheEntity<'a> {
                     self.awakening_frame = 8; // Start from frame 8
                     self.reverse_timer = 0.0;
                     self.sprite_sheet.pause(); // Stop loop animation
+                } else {
+                    // Manually cycle through awake frames 8-12 (0.2 seconds per frame)
+                    self.awake_animation_timer += delta_time;
+                    if self.awake_animation_timer >= 0.2 {
+                        self.awake_animation_timer = 0.0;
+                        // Cycle frames: 8 → 9 → 10 → 11 → 12 → 8
+                        self.awake_animation_frame += 1;
+                        if self.awake_animation_frame > 12 {
+                            self.awake_animation_frame = 8;  // Loop back to start
+                        }
+                        self.update_sprite_frame();
+                    }
                 }
             }
             EntityState::ReturningToDormant => {
@@ -329,8 +358,9 @@ impl<'a> TheEntity<'a> {
                 self.sprite_sheet.set_frame(sprite_index);
             }
             EntityState::Awake => {
-                // Let animation auto-play (should already be playing from on_hit)
-                // No action needed - update() handles frame advancement
+                // Manual control for awake animation (frames 8-12 loop)
+                self.sprite_sheet.pause();
+                self.sprite_sheet.set_frame(self.awake_animation_frame);
             }
             EntityState::ReturningToDormant => {
                 // Manual control during return
@@ -475,6 +505,7 @@ impl Saveable for TheEntity<'_> {
             state: EntityState,
             awakening_frame: usize,
             inactivity_timer: f32,
+            entity_type: EntityType,
         }
 
         let data = EntitySaveData {
@@ -484,6 +515,7 @@ impl Saveable for TheEntity<'_> {
             state: self.state,
             awakening_frame: self.awakening_frame,
             inactivity_timer: self.inactivity_timer,
+            entity_type: self.entity_type,
         };
 
         Ok(SaveData {

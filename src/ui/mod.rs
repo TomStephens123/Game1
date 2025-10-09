@@ -17,11 +17,11 @@
 //! # Available Components
 //!
 //! - [`HealthBar`] - Displays health above entities
+//! - [`FloatingText`] - Floating text for damage/heal numbers
+//! - [`BuffDisplay`] - Screen-space buff indicator display
 //!
 //! # Future Components (see docs/ui-system.md)
 //!
-//! - `DamageNumber` - Floating damage/heal numbers
-//! - `StatusIcon` - Buff/debuff indicators
 //! - `NameTag` - Entity name labels
 //! - `InteractionPrompt` - "Press E" text above interactables
 //!
@@ -50,5 +50,9 @@
 //! ```
 
 pub mod health_bar;
+pub mod floating_text;
+pub mod buff_display;
 
 pub use health_bar::{HealthBar, HealthBarStyle};
+pub use floating_text::{FloatingText, FloatingTextStyle};
+pub use buff_display::{BuffDisplay, BuffDisplayStyle};

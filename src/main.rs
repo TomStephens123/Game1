@@ -31,11 +31,12 @@ use player::Player;
 use render::render_with_depth_sorting;
 use save::{SaveManager, SaveFile, SaveMetadata, SaveType, WorldSaveData, EntitySaveData, Saveable, SaveData, CURRENT_SAVE_VERSION};
 use slime::Slime;
+use stats::{ModifierEffect, StatModifier, StatType};
 use text::draw_simple_text;
-use the_entity::{TheEntity, EntityState};
+use the_entity::{TheEntity, EntityState, EntityType};
 use tile::{TileId, WorldGrid, RenderGrid};
-use ui::{HealthBar, HealthBarStyle};
-use std::time::SystemTime;
+use ui::{HealthBar, HealthBarStyle, FloatingText, BuffDisplay};
+use std::time::{SystemTime, Instant};
 use serde::Deserialize;
 
 // Game resolution constants
@@ -49,6 +50,16 @@ enum GameState {
     Playing,
     ExitMenu,
     Dead, // New state for death screen
+}
+
+/// Floating text instance for tracking animated text
+struct FloatingTextInstance {
+    x: f32,
+    y: f32,
+    text: String,
+    color: Color,
+    lifetime: f32,
+    max_lifetime: f32,
 }
 
 /// Debug menu state
@@ -238,6 +249,7 @@ fn load_game<'a>(
                     state: EntityState,
                     awakening_frame: usize,
                     inactivity_timer: f32,
+                    entity_type: EntityType,
                 }
 
                 let saved_entity: EntitySaveData = serde_json::from_str(&entity_data.data)
@@ -251,7 +263,7 @@ fn load_game<'a>(
                 let sprite_sheet = sprite::SpriteSheet::new(entity_texture, frames);
 
                 // Create entity and restore state
-                let mut loaded_entity = TheEntity::new(saved_entity.id, saved_entity.x, saved_entity.y, sprite_sheet);
+                let mut loaded_entity = TheEntity::new(saved_entity.id, saved_entity.x, saved_entity.y, saved_entity.entity_type, sprite_sheet);
                 loaded_entity.state = saved_entity.state;
                 loaded_entity.awakening_frame = saved_entity.awakening_frame;
                 loaded_entity.inactivity_timer = saved_entity.inactivity_timer;
@@ -621,21 +633,22 @@ fn main() -> Result<(), String> {
                 let new_render_grid = RenderGrid::new(&new_world_grid);
 
                 // Spawn 4 entities at fixed locations for new game
-                let entity_spawn_locations = [
-                    (160, 120),   // Top-left quadrant
-                    (480, 120),   // Top-right quadrant
-                    (160, 240),   // Bottom-left quadrant
-                    (480, 240),   // Bottom-right quadrant
+                // Each entity provides a different buff when awakened
+                let entity_spawn_data = [
+                    (160, 120, EntityType::Attack),       // Top-left: +1 attack damage
+                    (480, 120, EntityType::Defense),      // Top-right: +1 defense
+                    (160, 240, EntityType::Speed),        // Bottom-left: +1 movement speed
+                    (480, 240, EntityType::Regeneration), // Bottom-right: +2 HP every 5 seconds
                 ];
 
                 let mut new_entities: Vec<TheEntity> = Vec::new();
-                for (id, (x, y)) in entity_spawn_locations.iter().enumerate() {
+                for (id, (x, y, entity_type)) in entity_spawn_data.iter().enumerate() {
                     let mut frames = Vec::new();
                     for i in 0..13 {
                         frames.push(sprite::Frame::new(i * 32, 0, 32, 32, 100));
                     }
                     let sprite_sheet = sprite::SpriteSheet::new(&entity_texture, frames);
-                    new_entities.push(TheEntity::new(id, *x, *y, sprite_sheet));
+                    new_entities.push(TheEntity::new(id, *x, *y, *entity_type, sprite_sheet));
                 }
 
                 (new_player, Vec::new(), new_world_grid, new_render_grid, new_entities)
@@ -656,6 +669,8 @@ fn main() -> Result<(), String> {
         low_health_color: Color::RGB(200, 0, 0),
         ..Default::default()
     });
+    let floating_text_renderer = FloatingText::new();
+    let buff_display = BuffDisplay::new(&texture_creator)?;
 
     // GUI Components: Screen-space menus
     let mut save_exit_menu = SaveExitMenu::new();
@@ -696,6 +711,16 @@ fn main() -> Result<(), String> {
     println!("- Push-apart physics prevents overlap");
     println!("- Touching slimes without attacking damages player (10 HP total)");
     println!("- 1 second invulnerability after taking damage");
+
+    // Regeneration timer for the Regeneration pyramid buff
+    let mut regen_timer = Instant::now();
+    let regen_interval = 5.0; // Heal every 5 seconds
+
+    // Floating text tracking for heal indicators
+    let mut floating_texts: Vec<FloatingTextInstance> = Vec::new();
+
+    // Track if regeneration is active (for buff display)
+    let mut has_regen = false;
 
     'running: loop {
         // Handle events
@@ -1060,6 +1085,88 @@ fn main() -> Result<(), String> {
             for entity in &mut entities {
                 entity.update(delta_time);
             }
+
+            // Update floating texts (move up and fade out)
+            for text in &mut floating_texts {
+                text.lifetime += delta_time;
+                text.y -= 20.0 * delta_time; // Rise upward
+            }
+            // Remove expired floating texts
+            floating_texts.retain(|text| text.lifetime < text.max_lifetime);
+
+            // Apply buffs from awake entities
+            // Build a list of modifier effects based on which entities are awake
+            player.active_modifiers.clear();
+            has_regen = false; // Reset each frame
+            for entity in &entities {
+                if entity.state == EntityState::Awake {
+                    match entity.entity_type {
+                        EntityType::Attack => {
+                            player.active_modifiers.push(ModifierEffect {
+                                stat_type: StatType::AttackDamage,
+                                modifier: StatModifier::Flat(1.0),
+                                duration: None,
+                                source: "Pyramid of Attack".to_string(),
+                            });
+                        }
+                        EntityType::Defense => {
+                            player.active_modifiers.push(ModifierEffect {
+                                stat_type: StatType::Defense,
+                                modifier: StatModifier::Flat(1.0),
+                                duration: None,
+                                source: "Pyramid of Defense".to_string(),
+                            });
+                        }
+                        EntityType::Speed => {
+                            player.active_modifiers.push(ModifierEffect {
+                                stat_type: StatType::MovementSpeed,
+                                modifier: StatModifier::Flat(1.0),
+                                duration: None,
+                                source: "Pyramid of Speed".to_string(),
+                            });
+                        }
+                        EntityType::Regeneration => {
+                            // Mark that regeneration is active
+                            has_regen = true;
+                        }
+                    }
+                }
+            }
+
+            // Handle regeneration timer
+            // Only heal if below max health to avoid any edge cases
+            if has_regen && regen_timer.elapsed().as_secs_f32() >= regen_interval {
+                if player.stats.health.current() < player.stats.max_health {
+                    // Heal player by 2 HP (capped at max)
+                    player.stats.health.heal(2.0);
+
+                    // Spawn floating "+2" text above player
+                    floating_texts.push(FloatingTextInstance {
+                        x: player.x as f32 + (player.width * SPRITE_SCALE) as f32 / 2.0,
+                        y: player.y as f32,
+                        text: "+2".to_string(),
+                        color: Color::RGB(0, 255, 0), // Green
+                        lifetime: 0.0,
+                        max_lifetime: 1.5, // Show for 1.5 seconds
+                    });
+
+                    // Find the regeneration entity and spawn text above it too
+                    for entity in &entities {
+                        if entity.state == EntityState::Awake && entity.entity_type == EntityType::Regeneration {
+                            floating_texts.push(FloatingTextInstance {
+                                x: entity.x as f32 + 16.0, // Center of 32px entity
+                                y: entity.y as f32,
+                                text: "+2".to_string(),
+                                color: Color::RGB(0, 255, 0), // Green
+                                lifetime: 0.0,
+                                max_lifetime: 1.5,
+                            });
+                            break; // Only one regen entity
+                        }
+                    }
+                }
+                regen_timer = Instant::now(); // Reset timer
+            }
         }
 
         // Check for respawn after death timer expires
@@ -1184,6 +1291,28 @@ fn main() -> Result<(), String> {
                     slime.health as f32 / 8.0, // Slimes have max 8 HP
                 )?;
             }
+        }
+
+        // Render floating texts (heal indicators, damage numbers, etc.)
+        for text in &floating_texts {
+            let alpha = ((1.0 - text.lifetime / text.max_lifetime) * 255.0) as u8;
+            floating_text_renderer.render(
+                &mut canvas,
+                text.x as i32,
+                text.y as i32,
+                &text.text,
+                text.color,
+                alpha,
+            )?;
+        }
+
+        // Render buff display (screen-space UI - shows in top-left)
+        if game_state == GameState::Playing {
+            buff_display.render(
+                &mut canvas,
+                &player.active_modifiers,
+                has_regen,
+            )?;
         }
 
         // Debug: Render collision boxes (toggle with 'B' key)

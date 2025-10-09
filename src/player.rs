@@ -3,7 +3,7 @@ use crate::collision::{Collidable, CollisionLayer};
 use crate::combat::{AttackEvent, DamageEvent, PlayerState, calculate_damage_with_defense};
 use crate::render::DepthSortable;
 use crate::save::{Saveable, SaveData, SaveError};
-use crate::stats::{Stats, DamageResult};
+use crate::stats::{Stats, DamageResult, ModifierEffect, StatType};
 use sdl2::keyboard::Scancode;
 use sdl2::rect::Rect;
 use sdl2::render::Canvas;
@@ -25,6 +25,9 @@ pub struct Player<'a> {
 
     // New comprehensive stats system
     pub stats: Stats,
+
+    // Active stat modifiers (buffs/debuffs from entities, items, etc.)
+    pub active_modifiers: Vec<ModifierEffect>,
 
     // Player state (Alive/Dead)
     pub state: PlayerState,
@@ -63,6 +66,7 @@ impl<'a> Player<'a> {
             is_taking_damage: false,  // Not taking damage initially
             animation_controller: AnimationController::new(),
             stats,
+            active_modifiers: Vec::new(),
             state: PlayerState::Alive,
             is_invulnerable: false,
             invulnerability_timer: Instant::now(),
@@ -85,8 +89,8 @@ impl<'a> Player<'a> {
         self.velocity_x = 0;
         self.velocity_y = 0;
 
-        // Get effective movement speed from stats (will support modifiers later)
-        let effective_speed = self.stats.movement_speed as i32;
+        // Get effective movement speed from stats with modifiers applied
+        let effective_speed = self.stats.effective_stat(StatType::MovementSpeed, &self.active_modifiers) as i32;
 
         // Only allow movement if not attacking or taking damage
         if !self.is_attacking && !self.is_taking_damage {
@@ -193,9 +197,9 @@ impl<'a> Player<'a> {
             return false;
         }
 
-        // Attack cooldown based on attack_speed stat
+        // Attack cooldown based on attack_speed stat with modifiers applied
         // attack_speed is attacks per second, so cooldown = 1.0 / attack_speed
-        let attack_cooldown = 1.0 / self.stats.attack_speed;
+        let attack_cooldown = 1.0 / self.stats.effective_stat(StatType::AttackSpeed, &self.active_modifiers);
         self.last_attack_time.elapsed().as_secs_f32() >= attack_cooldown
     }
 
@@ -216,7 +220,7 @@ impl<'a> Player<'a> {
         let hitbox_center_y = self.y + (self.hitbox_offset_y * SPRITE_SCALE) + (self.hitbox_height as i32 * SPRITE_SCALE / 2);
 
         Some(AttackEvent::new(
-            self.stats.attack_damage,
+            self.stats.effective_stat(StatType::AttackDamage, &self.active_modifiers),
             (hitbox_center_x, hitbox_center_y),
             self.direction,
             32, // Attack range in pixels (balanced for close-range combat)
@@ -240,8 +244,9 @@ impl<'a> Player<'a> {
             return DamageResult::no_damage();
         }
 
-        // Calculate final damage with defense
-        let final_damage = calculate_damage_with_defense(&damage_event, self.stats.defense);
+        // Calculate final damage with defense (including modifiers)
+        let effective_defense = self.stats.effective_stat(StatType::Defense, &self.active_modifiers);
+        let final_damage = calculate_damage_with_defense(&damage_event, effective_defense);
 
         let result = self.stats.health.take_damage(final_damage);
 
