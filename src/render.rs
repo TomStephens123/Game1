@@ -77,15 +77,14 @@ impl<'a> Renderable<'a> {
     /// Get the depth Y-coordinate for this renderable.
     ///
     /// Delegates to the underlying entity's `get_depth_y()` implementation.
-    fn get_depth_y(&self) -> i32 {
-        match self {
-            Renderable::Player(p) => p.get_depth_y(),
-            Renderable::Slime(s) => s.get_depth_y(),
-            Renderable::StaticObject(obj) => obj.get_depth_y(),
-            Renderable::TheEntity(e) => e.get_depth_y(),
-        }
-    }
-
+    // fn get_depth_y(&self) -> i32 {
+    //     match self {
+    //         Renderable::Player(p) => p.get_depth_y(),
+    //         Renderable::Slime(s) => s.get_depth_y(),
+    //         Renderable::StaticObject(obj) => obj.get_depth_y(),
+    //         Renderable::TheEntity(e) => e.get_depth_y(),
+    //     }
+    // }
     /// Render this entity to the canvas.
     ///
     /// Delegates to the underlying entity's `render()` implementation.

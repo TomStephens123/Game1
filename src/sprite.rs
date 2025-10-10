@@ -115,44 +115,17 @@ impl<'a> SpriteSheet<'a> {
         self.last_frame_time = Instant::now();
     }
 
-    /// Returns the current frame index.
-    ///
-    /// Useful for:
-    /// - Synchronizing animations across multiple sprites
-    /// - Checking animation progress
-    /// - Saving/loading animation state
-    ///
-    /// # Returns
-    /// The zero-based index of the currently displayed frame
-    pub fn get_current_frame(&self) -> usize {
-        self.current_frame
-    }
+    // pub fn get_current_frame(&self) -> usize {
+    //     self.current_frame
+    // }
 
-    /// Returns the total number of frames in this animation.
-    ///
-    /// Useful for:
-    /// - Calculating animation progress percentages
-    /// - Bounds checking before calling `set_frame()`
-    /// - Implementing custom frame advancement logic
-    ///
-    /// # Returns
-    /// The total count of frames, or 0 if no frames exist
-    pub fn frame_count(&self) -> usize {
-        self.frames.len()
-    }
+    // pub fn frame_count(&self) -> usize {
+    //     self.frames.len()
+    // }
 
-    /// Returns whether the animation is currently playing or paused.
-    ///
-    /// Useful for:
-    /// - Checking if animation needs to be resumed
-    /// - UI indicators showing animation state
-    /// - Conditional logic based on playback state
-    ///
-    /// # Returns
-    /// `true` if the animation is playing, `false` if paused
-    pub fn is_playing(&self) -> bool {
-        self.is_playing
-    }
+    // pub fn is_playing(&self) -> bool {
+    //     self.is_playing
+    // }
 
     pub fn set_loop(&mut self, should_loop: bool) {
         self.loop_animation = should_loop;

@@ -414,26 +414,31 @@ impl<'a> TheEntity<'a> {
 /// and players can walk "under" the floating part.
 impl StaticCollidable for TheEntity<'_> {
     fn get_bounds(&self) -> Rect {
+        let shrink_amount = 3 * SPRITE_SCALE as i32;
         match self.state {
             EntityState::Dormant | EntityState::Awakening | EntityState::ReversingToSleep => {
                 // Full collision - solid pyramid blocks player
                 Rect::new(
-                    self.x,
-                    self.y,
-                    self.width * SPRITE_SCALE,
-                    self.height * SPRITE_SCALE,
+                    self.x + shrink_amount,
+                    self.y + shrink_amount,
+                    self.width * SPRITE_SCALE - (shrink_amount * 2) as u32,
+                    self.height * SPRITE_SCALE - (shrink_amount * 2) as u32,
                 )
             }
             EntityState::Awake | EntityState::ReturningToDormant => {
-                // Partial collision - only bottom half (32px tall, base of pyramid)
+                // Partial collision - only bottom half and half width
+                let scaled_width = self.width * SPRITE_SCALE;
+                let new_width = scaled_width / 2;
+                let x_offset = (scaled_width - new_width) / 2;
+
                 let collision_height = (self.height / 2) * SPRITE_SCALE; // 16 * 2 = 32
                 let collision_y = self.y + collision_height as i32; // Offset down by 32
 
                 Rect::new(
-                    self.x,
-                    collision_y,
-                    self.width * SPRITE_SCALE,
-                    collision_height,
+                    self.x + x_offset as i32 + shrink_amount,
+                    collision_y + shrink_amount,
+                    new_width - (shrink_amount * 2) as u32,
+                    collision_height - (shrink_amount * 2) as u32,
                 )
             }
         }
@@ -456,8 +461,8 @@ impl StaticCollidable for TheEntity<'_> {
 impl DepthSortable for TheEntity<'_> {
     fn get_depth_y(&self) -> i32 {
         // Anchor at base of entity for proper depth sorting
-        // The Y position represents where the entity "touches the ground"
-        self.y
+        // The Y position represents where the entity "touches the ground" visually
+        self.y + (self.height * SPRITE_SCALE) as i32
     }
 
     fn render(&self, canvas: &mut Canvas<Window>) -> Result<(), String> {

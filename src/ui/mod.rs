@@ -54,5 +54,5 @@ pub mod floating_text;
 pub mod buff_display;
 
 pub use health_bar::{HealthBar, HealthBarStyle};
-pub use floating_text::{FloatingText, FloatingTextStyle};
-pub use buff_display::{BuffDisplay, BuffDisplayStyle};
+pub use floating_text::{FloatingText}; //, FloatingTextStyle};
+pub use buff_display::{BuffDisplay}; //, BuffDisplayStyle};

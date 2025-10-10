@@ -1227,13 +1227,21 @@ fn main() -> Result<(), String> {
         // Rust Learning: retain() is idiomatic for removing items from a Vec while iterating
         slimes.retain(|slime| slime.is_alive);
 
-        // Static object collision (walls, obstacles)
+        // Static object collision (walls, obstacles, and entities)
         // One-way collision: only the player gets pushed, static objects never move
-        let static_collisions = check_static_collisions(&player, &static_objects);
+        let mut all_static_collidables: Vec<&dyn StaticCollidable> = Vec::new();
+        for obj in &static_objects {
+            all_static_collidables.push(obj);
+        }
+        for entity in &entities {
+            all_static_collidables.push(entity);
+        }
+
+        let static_collisions = check_static_collisions(&player, &all_static_collidables);
 
         for obj_index in static_collisions {
             let player_bounds = player.get_bounds();
-            let obj_bounds = static_objects[obj_index].get_bounds();
+            let obj_bounds = all_static_collidables[obj_index].get_bounds();
 
             let (overlap_x, overlap_y) = calculate_overlap(&player_bounds, &obj_bounds);
 
@@ -1327,6 +1335,12 @@ fn main() -> Result<(), String> {
             for slime in &slimes {
                 let slime_bounds = slime.get_bounds();
                 canvas.draw_rect(slime_bounds).map_err(|e| e.to_string())?;
+            }
+
+            // TheEntity collision boxes
+            for entity in &entities {
+                let entity_bounds = entity.get_bounds();
+                canvas.draw_rect(entity_bounds).map_err(|e| e.to_string())?;
             }
 
             // Attack hitbox (if attacking)

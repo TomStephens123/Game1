@@ -80,13 +80,13 @@ impl<'a> BuffDisplay<'a> {
     }
 
     /// Creates a buff display with custom styling.
-    pub fn with_style(
-        style: BuffDisplayStyle,
-        texture_creator: &'a TextureCreator<WindowContext>,
-    ) -> Result<Self, String> {
-        let texture = texture_creator.load_texture("assets/sprites/icons.png")?;
-        Ok(BuffDisplay { style, texture })
-    }
+    // pub fn with_style(
+    //     style: BuffDisplayStyle,
+    //     texture_creator: &'a TextureCreator<WindowContext>,
+    // ) -> Result<Self, String> {
+    //     let texture = texture_creator.load_texture("assets/sprites/icons.png")?;
+    //     Ok(BuffDisplay { style, texture })
+    // }
 
     /// Renders the buff display with current active modifiers and regeneration status.
     ///

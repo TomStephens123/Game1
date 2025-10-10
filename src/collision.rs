@@ -312,9 +312,9 @@ impl DepthSortable for StaticObject {
 ///     // Resolve collision with static_objects[index]
 /// }
 /// ```
-pub fn check_static_collisions<T: StaticCollidable>(
+pub fn check_static_collisions(
     entity: &impl Collidable,
-    static_objects: &[T],
+    static_objects: &[&dyn StaticCollidable],
 ) -> Vec<usize> {
     let entity_bounds = entity.get_bounds();
     let mut collisions = Vec::new();
