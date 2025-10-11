@@ -109,9 +109,9 @@ impl FloatingText {
     }
 
     /// Creates a floating text renderer with custom styling
-    // pub fn with_style(style: FloatingTextStyle) -> Self {
-    //     FloatingText { style }
-    // }
+    pub fn with_style(style: FloatingTextStyle) -> Self {
+        FloatingText { style }
+    }
     /// Renders floating text at the specified position
     ///
     /// # Parameters
