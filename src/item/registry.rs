@@ -93,6 +93,16 @@ impl ItemRegistry {
             ItemProperties::Material,
         )).expect("Failed to register slime_ball");
 
+        // Stone (basic material, dropped by hitting dormant entities)
+        self.register(ItemDefinition::new(
+            "stone",
+            "Stone",
+            "A solid stone chunk. Useful for crafting.",
+            "assets/items/stone.png",
+            64,  // Max stack size
+            ItemProperties::Material,
+        )).expect("Failed to register stone");
+
         // Add more items here as they're created
         // Example: Health Potion
         // self.register(ItemDefinition::new(

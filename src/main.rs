@@ -1137,7 +1137,33 @@ fn main() -> Result<(), String> {
                 }
 
                 for entity in &mut entities {
-                    entity.check_hit(&attack_hitbox);
+                    if let Some(state_before_hit) = entity.check_hit(&attack_hitbox) {
+                        // Drop stone only if entity was not in Awake state
+                        if state_before_hit != the_entity::EntityState::Awake {
+                            // Create stone drop at entity center
+                            let drop_x = entity.x + (entity.width as i32) / 2;
+                            let drop_y = entity.y + (entity.height as i32) / 2;
+
+                            // Create animation controller for the stone item
+                            let mut item_animation_controller = animation::AnimationController::new();
+                            let item_frames = vec![sprite::Frame::new(0, 0, 32, 32, 300)];
+
+                            if let Some(item_texture) = item_textures.get("stone") {
+                                let item_sprite_sheet = sprite::SpriteSheet::new(item_texture, item_frames);
+                                item_animation_controller.add_animation("item_idle".to_string(), item_sprite_sheet);
+                                item_animation_controller.set_state("item_idle".to_string());
+
+                                let dropped_item = dropped_item::DroppedItem::new(
+                                    drop_x,
+                                    drop_y,
+                                    "stone".to_string(),
+                                    1,
+                                    item_animation_controller,
+                                );
+                                dropped_items.push(dropped_item);
+                            }
+                        }
+                    }
                 }
 
                 active_attack = None;

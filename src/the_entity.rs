@@ -373,7 +373,8 @@ impl<'a> TheEntity<'a> {
 
     /// Checks if a player attack hitbox intersects this entity.
     ///
-    /// If hit, triggers the on_hit() state transition and returns true.
+    /// If hit, triggers the on_hit() state transition and returns the state
+    /// before the hit occurred (useful for drop logic).
     ///
     /// # Parameters
     ///
@@ -381,22 +382,26 @@ impl<'a> TheEntity<'a> {
     ///
     /// # Returns
     ///
-    /// `true` if the attack hit this entity, `false` otherwise
+    /// `Some(EntityState)` with the state before the hit if the attack connected,
+    /// `None` if the attack missed
     ///
     /// # Example
     ///
     /// ```rust
-    /// if entity.check_hit(&player_attack_rect) {
-    ///     println!("Entity was hit!");
+    /// if let Some(state_before_hit) = entity.check_hit(&player_attack_rect) {
+    ///     if state_before_hit != EntityState::Awake {
+    ///         // Drop stone item
+    ///     }
     /// }
     /// ```
-    pub fn check_hit(&mut self, attack_hitbox: &Rect) -> bool {
+    pub fn check_hit(&mut self, attack_hitbox: &Rect) -> Option<EntityState> {
         let bounds = self.get_bounds();
         if aabb_intersect(&bounds, attack_hitbox) {
+            let state_before_hit = self.state;
             self.on_hit();
-            true
+            Some(state_before_hit)
         } else {
-            false
+            None
         }
     }
 }

@@ -79,7 +79,7 @@ impl<'a> DroppedItem<'a> {
     }
 
     pub fn render(&self, canvas: &mut Canvas<Window>) -> Result<(), String> {
-        let sprite_scale: u32 = if self.item_id == "slime_ball" {
+        let sprite_scale: u32 = if self.item_id == "slime_ball" || self.item_id == "stone" {
             1
         } else {
             2
