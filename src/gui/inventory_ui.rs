@@ -3,6 +3,8 @@
 //! Renders the player's inventory, including the hotbar and the main inventory window.
 //! Follows the Screen-Space GUI pattern.
 
+use crate::item::ItemStack;
+
 use sdl2::pixels::Color;
 use sdl2::rect::Rect;
 use sdl2::render::{Canvas, Texture};
@@ -41,17 +43,23 @@ impl Default for InventoryUIStyle {
 }
 
 /// Manages the rendering of the inventory UI.
-pub struct InventoryUI {
+pub struct InventoryUI<'a> {
     pub is_open: bool,
     style: InventoryUIStyle,
+    pub held_item: Option<ItemStack>,
+    item_textures: &'a HashMap<String, Texture<'a>>,
+    item_registry: &'a ItemRegistry,
 }
 
-impl InventoryUI {
+impl<'a> InventoryUI<'a> {
     /// Creates a new `InventoryUI` with default styling.
-    pub fn new() -> Self {
+    pub fn new(item_textures: &'a HashMap<String, Texture<'a>>, item_registry: &'a ItemRegistry) -> Self {
         InventoryUI {
             is_open: false,
             style: InventoryUIStyle::default(),
+            held_item: None,
+            item_textures,
+            item_registry,
         }
     }
 
@@ -60,26 +68,50 @@ impl InventoryUI {
         &self,
         canvas: &mut Canvas<Window>,
         player_inventory: &PlayerInventory,
-        item_registry: &ItemRegistry,
-        item_textures: &HashMap<String, Texture>,
         selected_hotbar_slot: usize,
+        mouse_x: i32,
+        mouse_y: i32,
     ) -> Result<(), String> {
-        self.render_hotbar(canvas, player_inventory, item_registry, item_textures, selected_hotbar_slot)?;
+        self.render_hotbar(canvas, player_inventory, selected_hotbar_slot)?;
 
         if self.is_open {
-            self.render_inventory_window(canvas, player_inventory, item_registry, item_textures)?;
+            self.render_inventory_window(canvas, player_inventory)?;
+        }
+
+        // Render held item
+        if let Some(held_stack) = &self.held_item {
+            if let Some(texture) = self.item_textures.get(&held_stack.item_id) {
+                let item_size = INVENTORY_SLOT_SIZE; // Render at full size
+                let item_rect = Rect::new(
+                    mouse_x - (item_size / 2) as i32, // Center on mouse
+                    mouse_y - (item_size / 2) as i32,
+                    item_size,
+                    item_size,
+                );
+                canvas.copy(texture, None, item_rect)?;
+
+                // Draw quantity if > 1
+                if held_stack.quantity > 1 {
+                    let quantity_text = format!("{}", held_stack.quantity);
+                    draw_simple_text(
+                        canvas,
+                        &quantity_text,
+                        mouse_x + (item_size / 4) as i32, // Position in bottom-right of held item
+                        mouse_y + (item_size / 4) as i32,
+                        Color::RGB(255, 255, 255),
+                        2,
+                    )?;
+                }
+            }
         }
 
         Ok(())
     }
 
-    /// Renders the hotbar at the bottom of the screen.
     fn render_hotbar(
         &self,
         canvas: &mut Canvas<Window>,
         player_inventory: &PlayerInventory,
-        item_registry: &ItemRegistry,
-        item_textures: &HashMap<String, Texture>,
         selected_hotbar_slot: usize,
     ) -> Result<(), String> {
         let (screen_width, screen_height) = canvas.logical_size();
@@ -106,7 +138,7 @@ impl InventoryUI {
 
             // Draw item sprite and stack count
             if let Some(item_stack) = &player_inventory.inventory.slots[i] {
-                if let Some(texture) = item_textures.get(&item_stack.item_id) {
+                if let Some(texture) = self.item_textures.get(&item_stack.item_id) {
                     // Center the item sprite within the slot
                     let item_size = HOTBAR_SLOT_SIZE - 8; // 4px padding on each side
                     let item_rect = Rect::new(
@@ -141,8 +173,6 @@ impl InventoryUI {
         &self,
         canvas: &mut Canvas<Window>,
         player_inventory: &PlayerInventory,
-        item_registry: &ItemRegistry,
-        item_textures: &HashMap<String, Texture>,
     ) -> Result<(), String> {
         let (screen_width, screen_height) = canvas.logical_size();
         let inventory_width = (INVENTORY_SLOT_SIZE + INVENTORY_SLOT_MARGIN) * 9 - INVENTORY_SLOT_MARGIN + 2 * INVENTORY_SLOT_MARGIN;
@@ -171,7 +201,7 @@ impl InventoryUI {
             canvas.draw_rect(slot_rect)?;
 
             if let Some(item_stack) = &player_inventory.inventory.slots[i] {
-                if let Some(texture) = item_textures.get(&item_stack.item_id) {
+                if let Some(texture) = self.item_textures.get(&item_stack.item_id) {
                     let item_size = INVENTORY_SLOT_SIZE - 16;
                     let item_rect = Rect::new(
                         slot_rect.x() + 8,
@@ -201,5 +231,142 @@ impl InventoryUI {
 
     pub fn toggle(&mut self) {
         self.is_open = !self.is_open;
+    }
+
+    pub fn handle_mouse_click(
+        &mut self,
+        mouse_x: i32,
+        mouse_y: i32,
+        screen_width: u32,
+        screen_height: u32,
+        player_inventory: &mut PlayerInventory,
+        shift_held: bool,
+    ) -> Result<(), String> {
+        if !self.is_open {
+            return Ok(()); // Only handle clicks if inventory is open
+        }
+
+        let clicked_slot_index = self.get_slot_at_mouse_pos(mouse_x, mouse_y, screen_width, screen_height);
+
+        match clicked_slot_index {
+            Some(index) => {
+                if shift_held {
+                    // Shift-click: transfer item
+                    // For now, we only have player inventory.
+                    // In the future, this will transfer to/from an open container.
+                    // For now, let's just move between hotbar and main inventory.
+                    // If clicked on hotbar, move to main inventory.
+                    // If clicked on main inventory, move to hotbar.
+                    if index < HOTBAR_SLOTS { // Clicked on hotbar
+                        // Try to move to main inventory (slots 9-26)
+                        let item_stack_option = player_inventory.inventory.slots[index].take();
+                        if let Some(item_stack) = item_stack_option {
+                            let overflow = player_inventory.inventory.add_item(&item_stack.item_id, item_stack.quantity, self.item_registry)?;
+                            if overflow > 0 {
+                                // Put overflow back
+                                player_inventory.inventory.slots[index] = Some(ItemStack::new(&item_stack.item_id, overflow));
+                            }
+                        }
+                    } else { // Clicked on main inventory
+                        // Try to move to hotbar (slots 0-8)
+                        let item_stack_option = player_inventory.inventory.slots[index].take();
+                        if let Some(item_stack) = item_stack_option {
+                            let overflow = player_inventory.inventory.add_item(&item_stack.item_id, item_stack.quantity, self.item_registry)?;
+                            if overflow > 0 {
+                                // Put overflow back
+                                player_inventory.inventory.slots[index] = Some(ItemStack::new(&item_stack.item_id, overflow));
+                            }
+                        }
+                    }
+                } else {
+                    // Normal click: pick up/place/swap
+                    if let Some(held_stack) = self.held_item.take() {
+                        // There is an item held, try to place it
+                        let current_slot_item = player_inventory.inventory.slots[index].take();
+                        player_inventory.inventory.slots[index] = Some(held_stack); // Place held item
+                        self.held_item = current_slot_item; // Pick up whatever was in the slot
+                    } else {
+                        // No item held, try to pick up from slot
+                        self.held_item = player_inventory.inventory.slots[index].take();
+                    }
+                }
+            }
+            None => {
+                // Clicked outside any slot
+                // For now, do nothing. Phase 3 will handle dropping items.
+            }
+        }
+
+        Ok(())
+    }
+
+    // Helper to get the hotbar's bounding rectangle
+    fn hotbar_rect(&self, screen_width: u32, screen_height: u32) -> Rect {
+        let hotbar_width = (HOTBAR_SLOT_SIZE + HOTBAR_SLOT_MARGIN) * HOTBAR_SLOTS as u32 - HOTBAR_SLOT_MARGIN;
+        let start_x = (screen_width - hotbar_width) / 2;
+        let start_y = screen_height as i32 - (HOTBAR_SLOT_SIZE as i32 + 15);
+        Rect::new(start_x as i32, start_y, hotbar_width, HOTBAR_SLOT_SIZE)
+    }
+
+    // Helper to get the main inventory window's bounding rectangle
+    fn inventory_window_rect(&self, screen_width: u32, screen_height: u32) -> Rect {
+        let inventory_width = (INVENTORY_SLOT_SIZE + INVENTORY_SLOT_MARGIN) * 9 - INVENTORY_SLOT_MARGIN + 2 * INVENTORY_SLOT_MARGIN;
+        let inventory_height = (INVENTORY_SLOT_SIZE + INVENTORY_SLOT_MARGIN) * 3 - INVENTORY_SLOT_MARGIN + 2 * INVENTORY_SLOT_MARGIN;
+        let start_x = (screen_width - inventory_width) / 2;
+        let start_y = (screen_height - inventory_height) / 2;
+        Rect::new(start_x as i32, start_y as i32, inventory_width, inventory_height)
+    }
+
+    pub fn is_mouse_over_inventory_window(&self, mouse_x: i32, mouse_y: i32, screen_width: u32, screen_height: u32) -> bool {
+        if !self.is_open {
+            return false;
+        }
+        let inv_window_rect = self.inventory_window_rect(screen_width, screen_height);
+        inv_window_rect.contains_point(sdl2::rect::Point::new(mouse_x, mouse_y))
+    }
+
+    // Returns the Rect for a given slot index (0-8 for hotbar, 9-26 for main inventory)
+    pub fn get_slot_rect(&self, slot_index: usize, screen_width: u32, screen_height: u32) -> Option<Rect> {
+        if slot_index < HOTBAR_SLOTS { // Hotbar slots
+            let hotbar_start_x = (screen_width - ((HOTBAR_SLOT_SIZE + HOTBAR_SLOT_MARGIN) * HOTBAR_SLOTS as u32 - HOTBAR_SLOT_MARGIN)) / 2;
+            let hotbar_start_y = screen_height as i32 - (HOTBAR_SLOT_SIZE as i32 + 15);
+            let slot_x = hotbar_start_x as i32 + (slot_index as i32 * (HOTBAR_SLOT_SIZE + HOTBAR_SLOT_MARGIN) as i32);
+            Some(Rect::new(slot_x, hotbar_start_y, HOTBAR_SLOT_SIZE, HOTBAR_SLOT_SIZE))
+        } else if self.is_open && slot_index < 27 { // Main inventory slots (only if open)
+            let inv_window_rect = self.inventory_window_rect(screen_width, screen_height);
+            let local_index = slot_index - HOTBAR_SLOTS; // 0-17 for main inventory
+            let row = local_index / 9;
+            let col = local_index % 9;
+            let slot_x = inv_window_rect.x() + INVENTORY_SLOT_MARGIN as i32 + (col as i32 * (INVENTORY_SLOT_SIZE + INVENTORY_SLOT_MARGIN) as i32);
+            let slot_y = inv_window_rect.y() + INVENTORY_SLOT_MARGIN as i32 + (row as i32 * (INVENTORY_SLOT_SIZE + INVENTORY_SLOT_MARGIN) as i32);
+            Some(Rect::new(slot_x, slot_y, INVENTORY_SLOT_SIZE, INVENTORY_SLOT_SIZE))
+        } else {
+            None
+        }
+    }
+
+    // Returns the slot index at a given mouse position, or None if not over a slot
+    pub fn get_slot_at_mouse_pos(&self, mouse_x: i32, mouse_y: i32, screen_width: u32, screen_height: u32) -> Option<usize> {
+        // Check hotbar slots first
+        for i in 0..HOTBAR_SLOTS {
+            if let Some(slot_rect) = self.get_slot_rect(i, screen_width, screen_height) {
+                if slot_rect.contains_point(sdl2::rect::Point::new(mouse_x, mouse_y)) {
+                    return Some(i);
+                }
+            }
+        }
+
+        // Check main inventory slots (only if open)
+        if self.is_open {
+            for i in HOTBAR_SLOTS..27 {
+                if let Some(slot_rect) = self.get_slot_rect(i, screen_width, screen_height) {
+                    if slot_rect.contains_point(sdl2::rect::Point::new(mouse_x, mouse_y)) {
+                        return Some(i);
+                    }
+                }
+            }
+        }
+
+        None
     }
 }

@@ -179,7 +179,7 @@ impl Saveable for DroppedItem<'_> {
         let item_data: DroppedItemData = serde_json::from_str(&data.json_data)?;
         // Animation controller is not saved, it will be recreated in main.rs
         let dummy_controller = AnimationController::new();
-        let mut item = DroppedItem::new(
+        let item = DroppedItem::new(
             item_data.x,
             item_data.y,
             item_data.item_id,

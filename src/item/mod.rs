@@ -11,7 +11,5 @@ pub mod registry;
 pub mod stack;
 
 // Re-export main types for convenient access
-pub use definition::ItemDefinition;
-pub use properties::{ItemProperties, ConsumableEffect, EquipmentSlot, ToolType};
 pub use registry::ItemRegistry;
 pub use stack::ItemStack;

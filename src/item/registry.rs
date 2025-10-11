@@ -89,7 +89,7 @@ impl ItemRegistry {
             "Slime Ball",
             "A bouncy ball of slime. Used in crafting.",
             "assets/items/slime_ball.png",
-            64,  // Max stack size
+            16,  // Max stack size
             ItemProperties::Material,
         )).expect("Failed to register slime_ball");
 

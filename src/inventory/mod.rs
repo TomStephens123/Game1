@@ -10,6 +10,4 @@ pub mod inventory;
 pub mod player;
 
 // Re-export main types
-pub use error::InventoryError;
-pub use inventory::Inventory;
 pub use player::PlayerInventory;

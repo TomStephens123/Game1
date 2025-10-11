@@ -671,7 +671,7 @@ fn main() -> Result<(), String> {
 
     let mut save_exit_menu = SaveExitMenu::new();
     let mut death_screen = DeathScreen::new();
-    let mut inventory_ui = InventoryUI::new();
+    let mut inventory_ui = InventoryUI::new(&item_textures, &item_registry);
 
     let boundary_thickness = 10;
     let static_objects = vec![
@@ -718,7 +718,13 @@ fn main() -> Result<(), String> {
     let mut show_collision_boxes = false;
     let mut show_tile_grid = false;
 
+    let mut mouse_x = 0;
+    let mut mouse_y = 0;
+
     'running: loop {
+        let keyboard_state = event_pump.keyboard_state();
+        let shift_held = keyboard_state.is_scancode_pressed(sdl2::keyboard::Scancode::LShift) ||
+                         keyboard_state.is_scancode_pressed(sdl2::keyboard::Scancode::RShift);
         for event in event_pump.poll_iter() {
             match event {
                 Event::Quit { .. } => break 'running,
@@ -960,6 +966,17 @@ fn main() -> Result<(), String> {
                     inventory_ui.toggle();
                 }
                 Event::KeyDown {
+                    keycode: Some(Keycode::P),
+                    ..
+                } if inventory_ui.is_open => {
+                    // Give a stack of 16 slime balls to the player
+                    match player_inventory.quick_add("slime_ball", 16, &item_registry) {
+                        Ok(0) => println!("Added 16 slime balls to inventory."),
+                        Ok(overflow) => println!("Inventory full. {} slime balls could not be added.", overflow),
+                        Err(e) => eprintln!("Error adding slime balls: {}", e),
+                    }
+                }
+                Event::KeyDown {
                     keycode: Some(Keycode::Num1),
                     ..
                 } => {
@@ -972,6 +989,10 @@ fn main() -> Result<(), String> {
                     selected_tile = TileId::Dirt;
                 }
                 Event::MouseButtonDown { mouse_btn: sdl2::mouse::MouseButton::Left, x, y, .. } => {
+                    if game_state == GameState::Playing && inventory_ui.is_open {
+                        let (screen_width, screen_height) = canvas.logical_size();
+                        inventory_ui.handle_mouse_click(x, y, screen_width, screen_height, &mut player_inventory, shift_held)?;
+                    }
                     is_painting = true;
                     let tile_x = x / 32;
                     let tile_y = y / 32;
@@ -981,11 +1002,41 @@ fn main() -> Result<(), String> {
                         last_painted_tile = Some((tile_x, tile_y));
                     }
                 }
-                Event::MouseButtonUp { mouse_btn: sdl2::mouse::MouseButton::Left, .. } => {
+                Event::MouseButtonUp { mouse_btn: sdl2::mouse::MouseButton::Left, x, y, .. } => {
                     is_painting = false;
                     last_painted_tile = None;
+
+                    // If an item is held and mouse is released outside inventory window, drop it
+                    if game_state == GameState::Playing && inventory_ui.held_item.is_some() {
+                        let (screen_width, screen_height) = canvas.logical_size();
+                        if !inventory_ui.is_mouse_over_inventory_window(x, y, screen_width, screen_height) {
+                            if let Some(item_stack) = inventory_ui.held_item.take() {
+                                // Spawn dropped item at player's position
+                                let mut item_animation_controller = animation::AnimationController::new();
+                                let item_frames = vec![
+                                    sprite::Frame::new(0, 0, 32, 32, 300),
+                                ];
+                                let item_texture = item_textures.get(&item_stack.item_id).ok_or(format!("Missing texture for item {}", item_stack.item_id))?;
+                                let item_sprite_sheet = SpriteSheet::new(item_texture, item_frames);
+                                item_animation_controller.add_animation("item_idle".to_string(), item_sprite_sheet);
+                                item_animation_controller.set_state("item_idle".to_string());
+
+                                let dropped_item = DroppedItem::new(
+                                    player.x,
+                                    player.y,
+                                    item_stack.item_id.clone(),
+                                    item_stack.quantity,
+                                    item_animation_controller,
+                                );
+                                dropped_items.push(dropped_item);
+                                println!("Dropped {} x{} at ({}, {})", item_stack.item_id, item_stack.quantity, player.x, player.y);
+                            }
+                        }
+                    }
                 }
                 Event::MouseMotion { x, y, .. } => {
+                    mouse_x = x;
+                    mouse_y = y;
                     if is_painting {
                         let tile_x = x / 32;
                         let tile_y = y / 32;
@@ -1398,7 +1449,7 @@ fn main() -> Result<(), String> {
         }
 
         if game_state == GameState::Playing {
-            inventory_ui.render(&mut canvas, &player_inventory, &item_registry, &item_textures, player_inventory.selected_hotbar_slot)?;
+            inventory_ui.render(&mut canvas, &player_inventory, player_inventory.selected_hotbar_slot, mouse_x, mouse_y)?;
         }
 
         if game_state == GameState::Dead {

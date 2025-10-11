@@ -45,3 +45,9 @@ impl fmt::Display for InventoryError {
 }
 
 impl std::error::Error for InventoryError {}
+
+impl From<InventoryError> for String {
+    fn from(error: InventoryError) -> Self {
+        error.to_string()
+    }
+}
