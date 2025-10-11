@@ -40,12 +40,21 @@ pub struct Player<'a> {
     // Attack cooldown system
     last_attack_time: Instant,
 
-    // Collision hitbox configuration
-    // Allows tuning the collision box independently from sprite rendering
-    pub hitbox_offset_x: i32,
-    pub hitbox_offset_y: i32,
-    pub hitbox_width: u32,
-    pub hitbox_height: u32,
+    // Environmental collision box configuration (for walls, static objects)
+    // This is separate from the damage hitbox to allow tight movement control
+    // while maintaining fair combat. All values are in unscaled sprite pixels.
+    pub collision_offset_x: i32,
+    pub collision_offset_y: i32,
+    pub collision_width: u32,
+    pub collision_height: u32,
+
+    // Damage hitbox configuration (for getting hit by enemies)
+    // This is typically larger than the collision box to ensure fair combat.
+    // All values are in unscaled sprite pixels.
+    pub damage_offset_x: i32,
+    pub damage_offset_y: i32,
+    pub damage_width: u32,
+    pub damage_height: u32,
 }
 
 impl<'a> Player<'a> {
@@ -73,11 +82,20 @@ impl<'a> Player<'a> {
             invulnerability_duration: 1.0, // 1 second of invulnerability after taking damage
             last_attack_time: Instant::now(),
 
-            // Default hitbox tuned to match actual sprite artwork
-            hitbox_offset_x: 8,  // 8 pixels from left edge (centered)
-            hitbox_offset_y: 8,  // 8 pixels from top edge
-            hitbox_width: 16,    // 16x16 square hitbox
-            hitbox_height: 16,
+            // Environmental collision box (tight, at feet)
+            // Centered horizontally, at base of sprite
+            // Dimensions: 8px wide x 16px tall (unscaled)
+            collision_offset_x: -6,   // Center 8px width (-4 to +4 from anchor)
+            collision_offset_y: -16,  // 18px up from anchor (2px higher than bottom half)
+            collision_width: 12,       // Narrow width for tight movement
+            collision_height: 8,     // Tall height for proper collision
+
+            // Damage hitbox (generous, covers body)
+            // Centered horizontally, covers most of sprite
+            damage_offset_x: -8,      // Center 16px width (-8 to +8 from anchor)
+            damage_offset_y: -24,     // 24px up from anchor (covers y=8 to y=32)
+            damage_width: 16,         // Square hitbox
+            damage_height: 16,        // Covers upper body
         }
     }
 
@@ -168,7 +186,14 @@ impl<'a> Player<'a> {
         const SPRITE_SCALE: u32 = 2;
         let scaled_width = self.width * SPRITE_SCALE;
         let scaled_height = self.height * SPRITE_SCALE;
-        let dest_rect = Rect::new(self.x, self.y, scaled_width, scaled_height);
+
+        // Calculate render position from anchor point (bottom-center)
+        // The anchor is where the player "stands" in the world
+        // We render the sprite upward and centered from this point
+        let render_x = self.x - (scaled_width / 2) as i32;
+        let render_y = self.y - scaled_height as i32;
+
+        let dest_rect = Rect::new(render_x, render_y, scaled_width, scaled_height);
 
         if let Some(sprite_sheet) = self.animation_controller.get_current_sprite_sheet() {
             sprite_sheet.render_directional(canvas, dest_rect, false, self.direction)
@@ -214,14 +239,14 @@ impl<'a> Player<'a> {
         self.is_attacking = true;
         self.last_attack_time = Instant::now();
 
-        // Calculate attack position from player's hitbox center
-        const SPRITE_SCALE: i32 = 2;
-        let hitbox_center_x = self.x + (self.hitbox_offset_x * SPRITE_SCALE) + (self.hitbox_width as i32 * SPRITE_SCALE / 2);
-        let hitbox_center_y = self.y + (self.hitbox_offset_y * SPRITE_SCALE) + (self.hitbox_height as i32 * SPRITE_SCALE / 2);
+        // Attack originates from player's visual center, not anchor (feet)
+        // This ensures attacks extend outward from the body, not the ground
+        const SPRITE_SCALE: u32 = 2;
+        let player_center_y = self.y - (self.height * SPRITE_SCALE / 2) as i32;
 
         Some(AttackEvent::new(
             self.stats.effective_stat(StatType::AttackDamage, &self.active_modifiers),
-            (hitbox_center_x, hitbox_center_y),
+            (self.x, player_center_y),  // Use visual center, not anchor
             self.direction,
             32, // Attack range in pixels (balanced for close-range combat)
         ))
@@ -332,38 +357,91 @@ impl<'a> Player<'a> {
         self.stats.health.is_alive()
     }
 
-    /// Sets custom hitbox parameters for fine-tuning collision detection.
+    /// Sets custom environmental collision box parameters.
     ///
-    /// Use this to adjust the collision box to match the actual sprite artwork.
+    /// Use this to adjust the collision box for walls and static objects.
     /// All values are in unscaled sprite pixels (will be multiplied by scale factor).
+    /// Offsets are relative to the anchor point (bottom-center).
     ///
     /// # Parameters
-    /// - `offset_x`: Horizontal offset from sprite position
-    /// - `offset_y`: Vertical offset from sprite position
-    /// - `width`: Width of the hitbox (before scaling)
-    /// - `height`: Height of the hitbox (before scaling)
+    /// - `offset_x`: Horizontal offset from anchor point
+    /// - `offset_y`: Vertical offset from anchor point (negative = upward)
+    /// - `width`: Width of the collision box (before scaling)
+    /// - `height`: Height of the collision box (before scaling)
     #[allow(dead_code)]
-    pub fn set_hitbox(&mut self, offset_x: i32, offset_y: i32, width: u32, height: u32) {
-        self.hitbox_offset_x = offset_x;
-        self.hitbox_offset_y = offset_y;
-        self.hitbox_width = width;
-        self.hitbox_height = height;
+    pub fn set_collision_box(&mut self, offset_x: i32, offset_y: i32, width: u32, height: u32) {
+        self.collision_offset_x = offset_x;
+        self.collision_offset_y = offset_y;
+        self.collision_width = width;
+        self.collision_height = height;
+    }
+
+    /// Sets custom damage hitbox parameters.
+    ///
+    /// Use this to adjust the hitbox for getting hit by enemies.
+    /// All values are in unscaled sprite pixels (will be multiplied by scale factor).
+    /// Offsets are relative to the anchor point (bottom-center).
+    ///
+    /// # Parameters
+    /// - `offset_x`: Horizontal offset from anchor point
+    /// - `offset_y`: Vertical offset from anchor point (negative = upward)
+    /// - `width`: Width of the damage hitbox (before scaling)
+    /// - `height`: Height of the damage hitbox (before scaling)
+    #[allow(dead_code)]
+    pub fn set_damage_hitbox(&mut self, offset_x: i32, offset_y: i32, width: u32, height: u32) {
+        self.damage_offset_x = offset_x;
+        self.damage_offset_y = offset_y;
+        self.damage_width = width;
+        self.damage_height = height;
+    }
+
+    /// Gets the bounding box for damage detection (getting hit by enemies).
+    ///
+    /// This is separate from environmental collision bounds (`get_bounds()`) and is
+    /// typically larger to ensure the player doesn't feel cheated by pixel-perfect hits.
+    /// The damage hitbox is calculated from the player's anchor point (bottom-center).
+    ///
+    /// # Returns
+    /// A `Rect` representing the damage hitbox in world coordinates
+    ///
+    /// # Example
+    /// ```rust
+    /// // Check if an enemy attack hits the player
+    /// let player_damage_bounds = player.get_damage_bounds();
+    /// if aabb_intersect(&enemy_attack_rect, &player_damage_bounds) {
+    ///     player.take_damage(damage_event);
+    /// }
+    /// ```
+    pub fn get_damage_bounds(&self) -> Rect {
+        const SPRITE_SCALE: u32 = 2;
+        let offset_x = self.damage_offset_x * SPRITE_SCALE as i32;
+        let offset_y = self.damage_offset_y * SPRITE_SCALE as i32;
+        let scaled_width = self.damage_width * SPRITE_SCALE;
+        let scaled_height = self.damage_height * SPRITE_SCALE;
+
+        Rect::new(
+            self.x + offset_x,
+            self.y + offset_y,
+            scaled_width,
+            scaled_height,
+        )
     }
 }
 
 // Collision System Implementation
 //
 // This trait implementation makes Player participate in the collision system.
-// The collision bounds match the player's rendered size (accounting for 2x scale).
+// The environmental collision bounds are calculated from the player's anchor point
+// (bottom-center) and are intentionally tight to allow responsive movement.
 impl<'a> Collidable for Player<'a> {
     fn get_bounds(&self) -> Rect {
-        // Use configurable hitbox instead of full sprite size
-        // This allows fine-tuning collision to match actual sprite artwork
+        // Environmental collision box (for walls, static objects)
+        // Calculated from anchor point at bottom-center of sprite
         const SPRITE_SCALE: u32 = 2;
-        let offset_x = self.hitbox_offset_x * SPRITE_SCALE as i32;
-        let offset_y = self.hitbox_offset_y * SPRITE_SCALE as i32;
-        let scaled_width = self.hitbox_width * SPRITE_SCALE;
-        let scaled_height = self.hitbox_height * SPRITE_SCALE;
+        let offset_x = self.collision_offset_x * SPRITE_SCALE as i32;
+        let offset_y = self.collision_offset_y * SPRITE_SCALE as i32;
+        let scaled_width = self.collision_width * SPRITE_SCALE;
+        let scaled_height = self.collision_height * SPRITE_SCALE;
 
         Rect::new(
             self.x + offset_x,
@@ -384,17 +462,17 @@ impl<'a> Collidable for Player<'a> {
 
 /// Implementation of depth sorting for the Player.
 ///
-/// The player's depth is determined by the bottom of their sprite (feet/base).
-/// This ensures proper visual layering in the 2.5D game world.
+/// The player's depth is determined by their anchor point (bottom-center).
+/// This ensures proper visual layering in the 2.5D game world - entities with
+/// smaller Y values render first (farther back), creating the illusion of depth.
 ///
 /// See docs/systems/depth-sorting-render-system.md for design documentation.
 impl DepthSortable for Player<'_> {
     fn get_depth_y(&self) -> i32 {
-        // Player's anchor point is at the bottom of the sprite
-        // This is where the player "touches the ground" visually
-        // Sprite height is scaled by SPRITE_SCALE (2x)
-        const SPRITE_SCALE: u32 = 2;
-        self.y + (self.height * SPRITE_SCALE) as i32
+        // Player's position is already at the anchor point (bottom-center)
+        // This is where the player "touches the ground" in the game world
+        // No calculation needed - the anchor is the depth!
+        self.y
     }
 
     fn render(&self, canvas: &mut Canvas<Window>) -> Result<(), String> {
@@ -429,11 +507,8 @@ impl Saveable for Player<'_> {
             // State
             is_alive: bool,
 
-            // Hitbox configuration
-            hitbox_offset_x: i32,
-            hitbox_offset_y: i32,
-            hitbox_width: u32,
-            hitbox_height: u32,
+            // Note: Collision/damage hitbox values are NOT saved
+            // They are configuration constants defined in code, not player state
         }
 
         // Determine if player is alive
@@ -451,10 +526,6 @@ impl Saveable for Player<'_> {
             defense: self.stats.defense,
             max_health: self.stats.max_health,
             is_alive,
-            hitbox_offset_x: self.hitbox_offset_x,
-            hitbox_offset_y: self.hitbox_offset_y,
-            hitbox_width: self.hitbox_width,
-            hitbox_height: self.hitbox_height,
         };
 
         Ok(SaveData {
@@ -477,10 +548,7 @@ impl Saveable for Player<'_> {
             defense: f32,
             max_health: f32,
             is_alive: bool,
-            hitbox_offset_x: i32,
-            hitbox_offset_y: i32,
-            hitbox_width: u32,
-            hitbox_height: u32,
+            // Note: Hitbox values not saved - using code defaults
         }
 
         if data.data_type != "player" {
@@ -535,14 +603,9 @@ impl Saveable for Player<'_> {
             };
         }
 
-        // Restore hitbox configuration
-        player.hitbox_offset_x = player_data.hitbox_offset_x;
-        player.hitbox_offset_y = player_data.hitbox_offset_y;
-        player.hitbox_width = player_data.hitbox_width;
-        player.hitbox_height = player_data.hitbox_height;
-
-        // Note: Animation controller, timers, and transient state are NOT saved
-        // They will be initialized to default values and set up externally
+        // Note: Hitbox values, animation controller, timers, and transient state are NOT saved
+        // Hitbox values use code defaults (configuration, not player state)
+        // Animation controller and timers are initialized to default values
 
         Ok(player)
     }

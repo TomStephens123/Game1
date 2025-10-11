@@ -60,11 +60,11 @@ impl<'a> Slime<'a> {
             has_dropped_loot: false,
 
             // Default hitbox for slime (smaller, rounder character)
-            // Tuned values: width=16, height=12 to match actual sprite artwork
-            hitbox_offset_x: 9,  // 9 pixels from left (centered with 1px adjustment)
-            hitbox_offset_y: 10, // 10 pixels from top (slime sits lower in frame)
-            hitbox_width: 16,    // 16 pixels wide
-            hitbox_height: 12,   // 12 pixels tall
+            // Calculated from anchor point (bottom-center), like player
+            hitbox_offset_x: -7,  // Center 16px width (-8 to +8 from anchor)
+            hitbox_offset_y: -24, // 12px up from anchor
+            hitbox_width: 16,     // 16 pixels wide
+            hitbox_height: 12,    // 12 pixels tall
         }
     }
 
@@ -158,7 +158,13 @@ impl<'a> Slime<'a> {
         const SPRITE_SCALE: u32 = 2;
         let scaled_width = self.width * SPRITE_SCALE;
         let scaled_height = self.height * SPRITE_SCALE;
-        let dest_rect = Rect::new(self.x, self.y, scaled_width, scaled_height);
+
+        // Calculate render position from anchor (bottom-center)
+        // self.y is base_y or modified by jump, both anchor-based
+        let render_x = self.x - (scaled_width / 2) as i32;
+        let render_y = self.y - scaled_height as i32;
+
+        let dest_rect = Rect::new(render_x, render_y, scaled_width, scaled_height);
 
         if let Some(sprite_sheet) = self.animation_controller.get_current_sprite_sheet() {
             sprite_sheet.render_flipped(canvas, dest_rect, false)
@@ -238,12 +244,10 @@ impl<'a> Slime<'a> {
 /// See docs/systems/depth-sorting-render-system.md for design documentation.
 impl DepthSortable for Slime<'_> {
     fn get_depth_y(&self) -> i32 {
-        // Slime's anchor point is at the base (bottom of sprite when on ground)
-        // Use base_y to ensure consistent depth during jump animation
-        // The visual Y position (self.y) changes during jumps, but the slime's
-        // depth in the scene should remain constant
-        const SPRITE_SCALE: u32 = 2;
-        self.base_y + (self.height * SPRITE_SCALE) as i32
+        // Slime's base_y is already at the anchor point (bottom)
+        // No calculation needed - just return the anchor!
+        // Use base_y (not y) to ensure consistent depth during jump animation
+        self.base_y
     }
 
     fn render(&self, canvas: &mut Canvas<Window>) -> Result<(), String> {
@@ -297,10 +301,7 @@ impl Saveable for Slime<'_> {
             health: i32,
             is_alive: bool,
             has_dropped_loot: bool,
-            hitbox_offset_x: i32,
-            hitbox_offset_y: i32,
-            hitbox_width: u32,
-            hitbox_height: u32,
+            // Hitbox values are NOT saved - they are configuration constants defined in code
         }
 
         let slime_data = SlimeData {
@@ -310,10 +311,6 @@ impl Saveable for Slime<'_> {
             health: self.health,
             is_alive: self.is_alive,
             has_dropped_loot: self.has_dropped_loot,
-            hitbox_offset_x: self.hitbox_offset_x,
-            hitbox_offset_y: self.hitbox_offset_y,
-            hitbox_width: self.hitbox_width,
-            hitbox_height: self.hitbox_height,
         };
 
         Ok(SaveData {
@@ -332,10 +329,7 @@ impl Saveable for Slime<'_> {
             is_alive: bool,
             #[serde(default)]
             has_dropped_loot: bool,
-            hitbox_offset_x: i32,
-            hitbox_offset_y: i32,
-            hitbox_width: u32,
-            hitbox_height: u32,
+            // Hitbox values are NOT loaded - they use defaults from Slime::new()
         }
 
         if data.data_type != "slime" {
@@ -349,21 +343,18 @@ impl Saveable for Slime<'_> {
 
         // Create slime with animation controller placeholder
         // The actual animation controller will be set externally
+        // Hitbox values will use defaults from constructor
         let mut slime = Slime::new(
             slime_data.x,
             slime_data.y,
             AnimationController::new(),
         );
 
-        // Restore state
+        // Restore state (hitbox config comes from constructor defaults)
         slime.base_y = slime_data.base_y;
         slime.health = slime_data.health;
         slime.is_alive = slime_data.is_alive;
         slime.has_dropped_loot = slime_data.has_dropped_loot;
-        slime.hitbox_offset_x = slime_data.hitbox_offset_x;
-        slime.hitbox_offset_y = slime_data.hitbox_offset_y;
-        slime.hitbox_width = slime_data.hitbox_width;
-        slime.hitbox_height = slime_data.hitbox_height;
 
         // Note: Behavior state and timers are NOT saved
         // Slimes will start in Idle state with reset timers

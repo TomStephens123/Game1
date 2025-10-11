@@ -2,6 +2,7 @@ use sdl2::event::Event;
 use sdl2::image::LoadTexture;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
+use sdl2::rect::Rect;
 
 mod animation;
 mod attack_effect;
@@ -22,7 +23,7 @@ mod the_entity;
 mod tile;
 mod ui;
 
-use animation::AnimationConfig;
+use animation::{AnimationConfig, AnimationController};
 use attack_effect::AttackEffect;
 use collision::{
     calculate_overlap, check_collisions_with_collection, check_static_collisions, Collidable,
@@ -955,6 +956,15 @@ fn main() -> Result<(), String> {
                     if let Some(attack_event) = player.start_attack() {
                         active_attack = Some(attack_event.clone());
 
+                        // Attack effect positioning
+                        // Player position is now anchor-based (bottom-center)
+                        // We want the effect centered on the player's body, then offset by direction
+
+                        // Calculate player's visual center from anchor
+                        let player_center_y = player.y - (player.height * SPRITE_SCALE) as i32 / 2;
+
+                        // Directional offset from player center
+                        // ADJUST THIS VALUE to change attack effect distance
                         let offset = 20;
                         let (offset_x, offset_y) = match player.direction {
                             crate::animation::Direction::North => (0, -offset),
@@ -967,8 +977,15 @@ fn main() -> Result<(), String> {
                             crate::animation::Direction::NorthWest => (-offset, -offset),
                         };
 
-                        let effect_x = player.x + offset_x;
-                        let effect_y = player.y + offset_y;
+                        // Calculate effect center position
+                        let effect_center_x = player.x + offset_x;
+                        let effect_center_y = player_center_y + offset_y;
+
+                        // Convert to top-left (AttackEffect uses top-left positioning)
+                        // Effect is 32x32 at 2x scale = 64x64
+                        let effect_size = 32 * SPRITE_SCALE as i32;
+                        let effect_x = effect_center_x - effect_size / 2;
+                        let effect_y = effect_center_y - effect_size / 2;
 
                         match punch_config.create_controller(&punch_texture, &["punch"]) {
                             Ok(punch_animation_controller) => {
@@ -1100,8 +1117,20 @@ fn main() -> Result<(), String> {
                                 &slime_texture,
                                 &["slime_idle", "jump", "slime_damage", "slime_death"],
                             )?;
-                            let center_offset = (32 * SPRITE_SCALE / 2) as i32;
-                            let mut new_slime = Slime::new(x - center_offset, y - center_offset, slime_animation_controller);
+
+                            // Spawn slime so that click position = collision box center
+                            // This makes spawning intuitive and easier for procedural generation
+                            //
+                            // Slime uses anchor positioning internally (bottom-center of sprite)
+                            // but we want the click to target the collision box center (visible body)
+                            //
+                            // To calculate anchor from desired collision center:
+                            // anchor = click - collision_offset - (collision_size / 2)
+                            let temp_slime = Slime::new(0, 0, AnimationController::new());
+                            let anchor_x = x - (temp_slime.hitbox_offset_x * SPRITE_SCALE as i32) - (temp_slime.hitbox_width * SPRITE_SCALE / 2) as i32;
+                            let anchor_y = y - (temp_slime.hitbox_offset_y * SPRITE_SCALE as i32) - (temp_slime.hitbox_height * SPRITE_SCALE / 2) as i32;
+
+                            let mut new_slime = Slime::new(anchor_x, anchor_y, slime_animation_controller);
                             new_slime.health = debug_config.slime_base_health;
                             slimes.push(new_slime);
                         }
@@ -1292,9 +1321,11 @@ fn main() -> Result<(), String> {
                 if player.stats.health.current() < player.stats.max_health {
                     player.stats.health.heal(2.0);
 
+                    // Player position is now at anchor (bottom-center)
+                    // x is already centered, y should be above player's head
                     floating_texts.push(FloatingTextInstance {
-                        x: player.x as f32 + (player.width * SPRITE_SCALE) as f32 / 2.0,
-                        y: player.y as f32,
+                        x: player.x as f32,
+                        y: (player.y - (player.height * SPRITE_SCALE) as i32) as f32,
                         text: "+2".to_string(),
                         color: Color::RGB(0, 255, 0),
                         lifetime: 0.0,
@@ -1397,16 +1428,19 @@ fn main() -> Result<(), String> {
                 item_animation_controller.add_animation("item_idle".to_string(), item_sprite_sheet);
                 item_animation_controller.set_state("item_idle".to_string());
 
+                // Drop item at center of slime's collision box (visible body center)
+                let drop_x = slime.x + (slime.hitbox_offset_x * SPRITE_SCALE as i32) + (slime.hitbox_width * SPRITE_SCALE / 2) as i32;
+                let drop_y = slime.y + (slime.hitbox_offset_y * SPRITE_SCALE as i32) + (slime.hitbox_height * SPRITE_SCALE / 2) as i32;
+
                 let dropped_item = DroppedItem::new(
-                    slime.x + 32,
-                    slime.y + 32,
+                    drop_x,
+                    drop_y,
                     "slime_ball".to_string(),
                     1,
                     item_animation_controller,
                 );
 
                 dropped_items.push(dropped_item);
-                println!("Slime dropped slime_ball at ({}, {})", slime.x + 32, slime.y + 32);
             }
         }
 
@@ -1480,10 +1514,15 @@ fn main() -> Result<(), String> {
         }
 
         if player.state.is_alive() {
+            // Health bar expects top-left coordinates, but player uses anchor (bottom-center)
+            // Calculate top-left from anchor for health bar rendering
+            let player_top_left_x = player.x - ((player.width * SPRITE_SCALE) / 2) as i32;
+            let player_top_left_y = player.y - (player.height * SPRITE_SCALE) as i32;
+
             player_health_bar.render(
                 &mut canvas,
-                player.x,
-                player.y,
+                player_top_left_x,
+                player_top_left_y,
                 player.width * SPRITE_SCALE,
                 player.height * SPRITE_SCALE,
                 player.stats.health.percentage(),
@@ -1492,10 +1531,15 @@ fn main() -> Result<(), String> {
 
         for slime in &slimes {
             if slime.is_alive {
+                // Health bar expects top-left coordinates, but slime uses anchor (bottom-center)
+                // Calculate top-left from anchor for health bar rendering
+                let slime_top_left_x = slime.x - ((slime.width * SPRITE_SCALE) / 2) as i32;
+                let slime_top_left_y = slime.y - (slime.height * SPRITE_SCALE) as i32;
+
                 enemy_health_bar.render(
                     &mut canvas,
-                    slime.x,
-                    slime.y,
+                    slime_top_left_x,
+                    slime_top_left_y,
                     slime.width * SPRITE_SCALE,
                     slime.height * SPRITE_SCALE,
                     slime.health as f32 / 8.0, // Slimes have max 8 HP
@@ -1524,14 +1568,41 @@ fn main() -> Result<(), String> {
         }
 
         if show_collision_boxes {
+            // RED: Environmental collision boxes (for push physics, walls)
             canvas.set_draw_color(sdl2::pixels::Color::RGBA(255, 0, 0, 128));
 
-            let player_bounds = player.get_bounds();
-            canvas.draw_rect(player_bounds).map_err(|e| e.to_string())?;
+            let player_collision = player.get_bounds();
+            canvas.draw_rect(player_collision).map_err(|e| e.to_string())?;
 
             for slime in &slimes {
                 let slime_bounds = slime.get_bounds();
                 canvas.draw_rect(slime_bounds).map_err(|e| e.to_string())?;
+
+                // YELLOW: Show where sprite SHOULD render (anchor visualization)
+                canvas.set_draw_color(sdl2::pixels::Color::RGBA(255, 255, 0, 200));
+                let sprite_render_x = slime.x - ((slime.width * SPRITE_SCALE) / 2) as i32;
+                let sprite_render_y = slime.y - (slime.height * SPRITE_SCALE) as i32;
+                let sprite_rect = Rect::new(
+                    sprite_render_x,
+                    sprite_render_y,
+                    slime.width * SPRITE_SCALE,
+                    slime.height * SPRITE_SCALE
+                );
+                canvas.draw_rect(sprite_rect).map_err(|e| e.to_string())?;
+
+                // WHITE: Show anchor point
+                canvas.set_draw_color(sdl2::pixels::Color::RGBA(255, 255, 255, 255));
+                let anchor_size: u32 = 4;
+                let anchor_rect = Rect::new(
+                    slime.x - (anchor_size as i32) / 2,
+                    slime.y - (anchor_size as i32) / 2,
+                    anchor_size,
+                    anchor_size
+                );
+                canvas.fill_rect(anchor_rect).map_err(|e| e.to_string())?;
+
+                // Restore red color for entities
+                canvas.set_draw_color(sdl2::pixels::Color::RGBA(255, 0, 0, 128));
             }
 
             for entity in &entities {
@@ -1539,6 +1610,13 @@ fn main() -> Result<(), String> {
                 canvas.draw_rect(entity_bounds).map_err(|e| e.to_string())?;
             }
 
+            // BLUE: Damage hitboxes (for getting hit by enemies)
+            canvas.set_draw_color(sdl2::pixels::Color::RGBA(0, 100, 255, 128));
+
+            let player_damage = player.get_damage_bounds();
+            canvas.draw_rect(player_damage).map_err(|e| e.to_string())?;
+
+            // GREEN: Attack hitboxes (for hitting enemies)
             if let Some(ref attack) = active_attack {
                 canvas.set_draw_color(sdl2::pixels::Color::RGBA(0, 255, 0, 128));
                 let attack_hitbox = attack.get_hitbox();

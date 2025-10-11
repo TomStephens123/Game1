@@ -183,19 +183,26 @@ pub fn render_with_depth_sorting(
 ```rust
 impl DepthSortable for Player<'_> {
     fn get_depth_y(&self) -> i32 {
-        // Player's base Y coordinate (bottom of sprite)
-        // Sprite height is scaled by SPRITE_SCALE
-        self.y + (self.height * SPRITE_SCALE) as i32
+        // Player position is already at the anchor point (bottom-center)
+        // This is where the player "touches the ground" in the world
+        // No calculation needed - the anchor is the depth!
+        self.y
     }
 
     fn render(&self, canvas: &mut Canvas<Window>) -> Result<(), String> {
-        // Existing player rendering logic
+        // Calculate render position from anchor (bottom-center)
+        const SPRITE_SCALE: u32 = 2;
+        let render_x = self.x - (self.width * SPRITE_SCALE / 2) as i32;
+        let render_y = self.y - (self.height * SPRITE_SCALE) as i32;
+
         self.animation_controller.get_current_sprite_sheet()
-            .render(canvas, self.x, self.y, SPRITE_SCALE)?;
+            .render(canvas, render_x, render_y, SPRITE_SCALE)?;
         Ok(())
     }
 }
 ```
+
+**Key Point**: Player now uses anchor-based positioning where `(x, y)` represents the bottom-center point where the player stands, matching the pattern used by other entities.
 
 ### Slime Implementation
 
@@ -564,6 +571,138 @@ enum RenderLayer {
 ### 3. Z-Buffer (Advanced)
 For complex 3D-like scenarios, use Z-buffering instead of sorting
 
+## Standard Entity Pattern: Anchor-Based Positioning
+
+**All entities in Game1 should follow this standard pattern:**
+
+### Position Semantics
+- `(x, y)` represents the **anchor point** (where the entity "touches the ground")
+- For most entities, this is **bottom-center** of the sprite
+- This makes positioning intuitive and depth sorting automatic
+
+### Rendering from Anchor
+```rust
+pub fn render(&self, canvas: &mut Canvas<Window>) -> Result<(), String> {
+    const SPRITE_SCALE: u32 = 2;
+    let scaled_width = self.width * SPRITE_SCALE;
+    let scaled_height = self.height * SPRITE_SCALE;
+
+    // Calculate render position from anchor (bottom-center)
+    let render_x = self.x - (scaled_width / 2) as i32;
+    let render_y = self.y - scaled_height as i32;
+
+    let dest_rect = Rect::new(render_x, render_y, scaled_width, scaled_height);
+    // ... render sprite
+}
+```
+
+### Depth Sorting from Anchor
+```rust
+impl DepthSortable for MyEntity<'_> {
+    fn get_depth_y(&self) -> i32 {
+        self.y  // Anchor is already at the correct depth!
+    }
+
+    fn render(&self, canvas: &mut Canvas<Window>) -> Result<(), String> {
+        MyEntity::render(self, canvas)  // Delegate to existing render
+    }
+}
+```
+
+### Collision from Anchor
+```rust
+impl Collidable for MyEntity<'_> {
+    fn get_bounds(&self) -> Rect {
+        const SPRITE_SCALE: u32 = 2;
+
+        // Offsets are relative to anchor (negative = upward)
+        let offset_x = self.collision_offset_x * SPRITE_SCALE as i32;
+        let offset_y = self.collision_offset_y * SPRITE_SCALE as i32;
+        let scaled_width = self.collision_width * SPRITE_SCALE;
+        let scaled_height = self.collision_height * SPRITE_SCALE;
+
+        Rect::new(
+            self.x + offset_x,
+            self.y + offset_y,
+            scaled_width,
+            scaled_height,
+        )
+    }
+}
+```
+
+### Benefits of This Pattern
+1. **Consistent**: All entities work the same way
+2. **Intuitive**: Position = "where it stands"
+3. **Automatic**: Depth sorting just works
+4. **Clean**: No offset calculations in depth sorting
+
+### Entities Using This Pattern
+- ✅ **Player**: Bottom-center anchor (as of January 2025)
+- ✅ **Slime**: Base Y anchor (with jump offset)
+- ✅ **TheEntity**: Bottom anchor
+- ✅ **DroppedItem**: Center anchor (special case for floating items)
+- ✅ **StaticObject**: Bottom/base anchor
+
+### Adding New Entities
+When creating a new entity, follow these steps:
+
+1. **Define position fields**:
+   ```rust
+   pub struct MyEntity<'a> {
+       pub x: i32,  // Anchor X (center)
+       pub y: i32,  // Anchor Y (base/bottom)
+       pub width: u32,
+       pub height: u32,
+       // ... other fields
+   }
+   ```
+
+2. **Implement rendering from anchor**:
+   ```rust
+   pub fn render(&self, canvas: &mut Canvas<Window>) -> Result<(), String> {
+       let render_x = self.x - (self.width * SPRITE_SCALE / 2) as i32;
+       let render_y = self.y - (self.height * SPRITE_SCALE) as i32;
+       // ... render at (render_x, render_y)
+   }
+   ```
+
+3. **Implement DepthSortable**:
+   ```rust
+   impl DepthSortable for MyEntity<'_> {
+       fn get_depth_y(&self) -> i32 { self.y }
+       fn render(&self, canvas: &mut Canvas<Window>) -> Result<(), String> {
+           MyEntity::render(self, canvas)
+       }
+   }
+   ```
+
+4. **Implement Collidable (if needed)**:
+   ```rust
+   impl Collidable for MyEntity<'_> {
+       fn get_bounds(&self) -> Rect {
+           // Calculate from anchor with offsets
+       }
+   }
+   ```
+
+5. **Add to Renderable enum** (in `src/render.rs`):
+   ```rust
+   pub enum Renderable<'a> {
+       Player(&'a Player<'a>),
+       Slime(&'a Slime<'a>),
+       MyEntity(&'a MyEntity<'a>),  // Add your entity
+       // ...
+   }
+   ```
+
+6. **Update render_with_depth_sorting** (in `src/render.rs`):
+   ```rust
+   // Add my_entities parameter and push to renderables
+   ```
+
+See `docs/features/player-anchor-rendering.md` for detailed examples.
+
 ## Summary
 
 The depth-sorting render system provides:
@@ -574,6 +713,7 @@ The depth-sorting render system provides:
 ✅ **Performance**: O(n log n) sorting, negligible overhead
 ✅ **Extensibility**: Easy to add new entity types
 ✅ **Rust Learning**: Traits, enums, sorting, borrowing
+✅ **Standard Pattern**: Anchor-based positioning for all entities
 
 This system is the foundation for creating believable 2.5D depth in our game world!
 
