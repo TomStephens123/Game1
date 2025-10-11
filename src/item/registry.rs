@@ -103,6 +103,20 @@ impl ItemRegistry {
             ItemProperties::Material,
         )).expect("Failed to register stone");
 
+        // Hoe (farming tool, converts grass to dirt)
+        self.register(ItemDefinition::new(
+            "hoe",
+            "Hoe",
+            "A simple farming tool for tilling soil.",
+            "assets/items/hoe.png",
+            1,  // Non-stackable (tools don't stack)
+            ItemProperties::Tool {
+                tool_type: ToolType::Hoe,
+                durability: 100,
+                mining_speed: 1.0,
+            },
+        )).expect("Failed to register hoe");
+
         // Add more items here as they're created
         // Example: Health Potion
         // self.register(ItemDefinition::new(

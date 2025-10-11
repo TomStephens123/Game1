@@ -32,7 +32,7 @@ use combat::{DamageEvent, DamageSource};
 use dropped_item::DroppedItem;
 use gui::{SaveExitMenu, SaveExitOption, DeathScreen, InventoryUI};
 use inventory::PlayerInventory;
-use item::ItemRegistry;
+use item::{ItemRegistry, ItemProperties, ToolType};
 use player::Player;
 use render::render_with_depth_sorting;
 use save::{SaveManager, SaveFile, SaveMetadata, SaveType, WorldSaveData, EntitySaveData, Saveable, SaveData, CURRENT_SAVE_VERSION};
@@ -716,9 +716,8 @@ fn main() -> Result<(), String> {
 
     let mut active_attack: Option<combat::AttackEvent> = None;
     let mut attack_effects: Vec<AttackEffect> = Vec::new();
-    let mut selected_tile = TileId::Grass;
-    let mut is_painting = false;
-    let mut last_painted_tile: Option<(i32, i32)> = None;
+    let mut is_tilling = false;
+    let mut last_tilled_tile: Option<(i32, i32)> = None;
     let mut show_collision_boxes = false;
     let mut show_tile_grid = false;
 
@@ -1020,16 +1019,15 @@ fn main() -> Result<(), String> {
                     }
                 }
                 Event::KeyDown {
-                    keycode: Some(Keycode::Num1),
+                    keycode: Some(Keycode::H),
                     ..
-                } if !is_ui_active => {
-                    selected_tile = TileId::Grass;
-                }
-                Event::KeyDown {
-                    keycode: Some(Keycode::Num2),
-                    ..
-                } if !is_ui_active => {
-                    selected_tile = TileId::Dirt;
+                } if inventory_ui.is_open => {
+                    // Give a hoe to the player (debug command)
+                    match player_inventory.quick_add("hoe", 1, &item_registry) {
+                        Ok(0) => println!("Added hoe to inventory."),
+                        Ok(_overflow) => println!("Inventory full. Hoe could not be added."),
+                        Err(e) => eprintln!("Error adding hoe: {}", e),
+                    }
                 }
                 Event::MouseButtonDown { mouse_btn, x, y, .. } => {
                     if game_state == GameState::Playing && inventory_ui.is_open {
@@ -1052,19 +1050,30 @@ fn main() -> Result<(), String> {
                             slimes.push(new_slime);
                         }
 
-                        is_painting = true;
-                        let tile_x = x / 32;
-                        let tile_y = y / 32;
+                        // Check if player has a hoe selected in hotbar
+                        if let Some(selected_item) = player_inventory.get_selected_hotbar() {
+                            if let Some(item_def) = item_registry.get(&selected_item.item_id) {
+                                if let ItemProperties::Tool { tool_type: ToolType::Hoe, .. } = item_def.properties {
+                                    // Player has a hoe selected, allow tilling
+                                    is_tilling = true;
+                                    let tile_x = x / 32;
+                                    let tile_y = y / 32;
 
-                        if world_grid.set_tile(tile_x, tile_y, selected_tile) {
-                            render_grid.update_tile_and_neighbors(&world_grid, tile_x, tile_y);
-                            last_painted_tile = Some((tile_x, tile_y));
+                                    // Only allow grass -> dirt conversion
+                                    if world_grid.get_tile(tile_x, tile_y) == Some(TileId::Grass) {
+                                        if world_grid.set_tile(tile_x, tile_y, TileId::Dirt) {
+                                            render_grid.update_tile_and_neighbors(&world_grid, tile_x, tile_y);
+                                            last_tilled_tile = Some((tile_x, tile_y));
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
                 Event::MouseButtonUp { mouse_btn: sdl2::mouse::MouseButton::Left, x, y, .. } => {
-                    is_painting = false;
-                    last_painted_tile = None;
+                    is_tilling = false;
+                    last_tilled_tile = None;
 
                     // If an item is held and mouse is released outside inventory window, drop it
                     if game_state == GameState::Playing && inventory_ui.held_item.is_some() {
@@ -1097,14 +1106,17 @@ fn main() -> Result<(), String> {
                 Event::MouseMotion { x, y, .. } => {
                     mouse_x = x;
                     mouse_y = y;
-                    if is_painting && !is_ui_active {
+                    if is_tilling && !is_ui_active {
                         let tile_x = x / 32;
                         let tile_y = y / 32;
 
-                        if last_painted_tile != Some((tile_x, tile_y)) {
-                            if world_grid.set_tile(tile_x, tile_y, selected_tile) {
-                                render_grid.update_tile_and_neighbors(&world_grid, tile_x, tile_y);
-                                last_painted_tile = Some((tile_x, tile_y));
+                        if last_tilled_tile != Some((tile_x, tile_y)) {
+                            // Only allow grass -> dirt conversion
+                            if world_grid.get_tile(tile_x, tile_y) == Some(TileId::Grass) {
+                                if world_grid.set_tile(tile_x, tile_y, TileId::Dirt) {
+                                    render_grid.update_tile_and_neighbors(&world_grid, tile_x, tile_y);
+                                    last_tilled_tile = Some((tile_x, tile_y));
+                                }
                             }
                         }
                     }

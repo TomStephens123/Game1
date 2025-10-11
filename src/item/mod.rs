@@ -13,3 +13,4 @@ pub mod stack;
 // Re-export main types for convenient access
 pub use registry::ItemRegistry;
 pub use stack::ItemStack;
+pub use properties::{ItemProperties, ToolType};
