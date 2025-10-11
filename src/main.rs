@@ -1155,12 +1155,37 @@ fn main() -> Result<(), String> {
 
             if !player.is_attacking && !slimes[slime_index].is_invulnerable() {
                 let damage = DamageEvent::physical(debug_config.slime_contact_damage, DamageSource::Enemy);
-                player.take_damage(damage);
+                let damage_result = player.take_damage(damage);
+                if damage_result.is_fatal {
+                    // Drop all items from player inventory
+                    for item_stack_option in player_inventory.inventory.slots.iter_mut() {
+                        if let Some(item_stack) = item_stack_option.take() {
+                            let mut item_animation_controller = animation::AnimationController::new();
+                            let item_frames = vec![
+                                sprite::Frame::new(0, 0, 32, 32, 300),
+                            ];
+                            let item_texture = item_textures.get(&item_stack.item_id).ok_or(format!("Missing texture for item {}", item_stack.item_id))?;
+                            let item_sprite_sheet = SpriteSheet::new(item_texture, item_frames);
+                            item_animation_controller.add_animation("item_idle".to_string(), item_sprite_sheet);
+                            item_animation_controller.set_state("item_idle".to_string());
+
+                            let dropped_item = DroppedItem::new(
+                                player.x,
+                                player.y,
+                                item_stack.item_id.clone(),
+                                item_stack.quantity,
+                                item_animation_controller,
+                            );
+                            dropped_items.push(dropped_item);
+                        }
+                    }
+                    println!("Player died and dropped all items.");
+                }
             }
         }
 
         for slime in &mut slimes {
-            if !slime.is_alive && !slime.has_dropped_loot {
+            if slime.is_dying() && !slime.has_dropped_loot {
                 slime.has_dropped_loot = true;
                 let mut item_animation_controller = animation::AnimationController::new();
 
@@ -1176,15 +1201,15 @@ fn main() -> Result<(), String> {
                 item_animation_controller.set_state("item_idle".to_string());
 
                 let dropped_item = DroppedItem::new(
-                    slime.x + 8,
-                    slime.y + 8,
+                    slime.x + 32,
+                    slime.y + 32,
                     "slime_ball".to_string(),
                     1,
                     item_animation_controller,
                 );
 
                 dropped_items.push(dropped_item);
-                println!("Slime dropped slime_ball at ({}, {})", slime.x + 8, slime.y + 8);
+                println!("Slime dropped slime_ball at ({}, {})", slime.x + 32, slime.y + 32);
             }
         }
 

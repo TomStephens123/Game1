@@ -80,6 +80,10 @@ impl<'a> Slime<'a> {
         matches!(self.behavior, SlimeBehavior::TakingDamage | SlimeBehavior::Dying)
     }
 
+    pub fn is_dying(&self) -> bool {
+        self.behavior == SlimeBehavior::Dying
+    }
+
     pub fn update(&mut self) {
         // IMPORTANT: Update animation controller FIRST
         // This ensures animations are reset before we check is_animation_finished()
