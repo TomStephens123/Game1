@@ -81,7 +81,7 @@ impl<'a> InventoryUI<'a> {
         // Render held item
         if let Some(held_stack) = &self.held_item {
             if let Some(texture) = self.item_textures.get(&held_stack.item_id) {
-                let item_size = INVENTORY_SLOT_SIZE; // Render at full size
+                let item_size = (INVENTORY_SLOT_SIZE as f32 * 1.2) as u32; // Render slightly bigger
                 let item_rect = Rect::new(
                     mouse_x - (item_size / 2) as i32, // Center on mouse
                     mouse_y - (item_size / 2) as i32,

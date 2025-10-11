@@ -85,6 +85,7 @@ enum DebugMenuItem {
     PlayerAttackSpeed,
     SlimeHealth,
     SlimeContactDamage,
+    ClearInventory,
 }
 
 impl DebugMenuItem {
@@ -95,6 +96,7 @@ impl DebugMenuItem {
             Self::PlayerAttackSpeed,
             Self::SlimeHealth,
             Self::SlimeContactDamage,
+            Self::ClearInventory,
         ]
     }
 
@@ -105,6 +107,7 @@ impl DebugMenuItem {
             Self::PlayerAttackSpeed => "Player Atk Spd",
             Self::SlimeHealth => "Slime Health",
             Self::SlimeContactDamage => "Slime Contact Dmg",
+            Self::ClearInventory => "Clear Inventory",
         }
     }
 }
@@ -508,6 +511,7 @@ fn render_debug_menu(
             DebugMenuItem::PlayerAttackSpeed => format!("{:.1}", player.stats.attack_speed),
             DebugMenuItem::SlimeHealth => format!("{}", debug_config.slime_base_health),
             DebugMenuItem::SlimeContactDamage => format!("{:.1}", debug_config.slime_contact_damage),
+            DebugMenuItem::ClearInventory => "".to_string(), // No value to display
         };
 
         draw_simple_text(
@@ -804,6 +808,21 @@ fn main() -> Result<(), String> {
                     }
                 }
                 Event::KeyDown {
+                    keycode: Some(Keycode::Return | Keycode::Space),
+                    ..
+                } if matches!(debug_menu_state, DebugMenuState::Open { .. }) => {
+                    if let DebugMenuState::Open { selected_index } = debug_menu_state {
+                        let items = DebugMenuItem::all();
+                        match items[selected_index] {
+                            DebugMenuItem::ClearInventory => {
+                                player_inventory.inventory.clear();
+                                println!("Player inventory cleared!");
+                            }
+                            _ => { /* Other debug menu items don't have an action on Enter/Space */ }
+                        }
+                    }
+                }
+                Event::KeyDown {
                     keycode: Some(Keycode::F3),
                     ..
                 } if game_state == GameState::Playing => {
@@ -871,6 +890,9 @@ fn main() -> Result<(), String> {
                             DebugMenuItem::SlimeContactDamage => {
                                 debug_config.slime_contact_damage = (debug_config.slime_contact_damage + delta).max(0.0);
                             }
+                            DebugMenuItem::ClearInventory => {
+                                // This item doesn't change value with left/right, it's an action.
+                            }
                         }
                     }
                 }
@@ -902,6 +924,9 @@ fn main() -> Result<(), String> {
                             }
                             DebugMenuItem::SlimeContactDamage => {
                                 debug_config.slime_contact_damage += delta;
+                            }
+                            DebugMenuItem::ClearInventory => {
+                                // This item doesn't change value with left/right, it's an action.
                             }
                         }
                     }
