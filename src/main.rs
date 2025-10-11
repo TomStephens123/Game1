@@ -749,7 +749,14 @@ fn main() -> Result<(), String> {
                 } => {
                     match game_state {
                         GameState::Playing => {
-                            game_state = GameState::ExitMenu;
+                            // Close other UIs first before opening save/exit menu
+                            if inventory_ui.is_open {
+                                inventory_ui.is_open = false;
+                            } else if matches!(debug_menu_state, DebugMenuState::Open { .. }) {
+                                debug_menu_state = DebugMenuState::Closed;
+                            } else {
+                                game_state = GameState::ExitMenu;
+                            }
                         }
                         GameState::ExitMenu => {
                             game_state = GameState::Playing;
