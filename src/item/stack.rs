@@ -25,6 +25,7 @@ impl ItemStack {
     /// Returns true if this stack can merge with another
     ///
     /// Stacks can merge if they're the same item type
+    #[allow(dead_code)]  // Reserved for future stack merging feature
     pub fn can_merge_with(&self, other: &ItemStack) -> bool {
         self.item_id == other.item_id
     }
@@ -41,6 +42,7 @@ impl ItemStack {
     /// assert_eq!(stack1.quantity, 64);
     /// assert_eq!(overflow, 6);
     /// ```
+    #[allow(dead_code)]  // Reserved for future stack merging feature
     pub fn merge(&mut self, other: ItemStack, max_stack_size: u32) -> u32 {
         if !self.can_merge_with(&other) {
             return other.quantity;  // Can't merge, return all as overflow
@@ -71,6 +73,7 @@ impl ItemStack {
     /// assert_eq!(stack.quantity, 7);
     /// assert_eq!(split.quantity, 3);
     /// ```
+    #[allow(dead_code)]  // Reserved for future stack splitting feature (shift-click)
     pub fn split(&mut self, amount: u32) -> Option<ItemStack> {
         if amount == 0 || amount >= self.quantity {
             return None;  // Can't split 0 or entire stack
@@ -95,6 +98,7 @@ impl ItemStack {
     /// assert_eq!(taken, 5);  // Only had 5 to take
     /// assert_eq!(stack.quantity, 0);
     /// ```
+    #[allow(dead_code)]  // Reserved for future partial stack taking
     pub fn take(&mut self, amount: u32) -> u32 {
         let taken = amount.min(self.quantity);
         self.quantity -= taken;
@@ -117,6 +121,7 @@ impl ItemStack {
     }
 
     /// Returns true if this stack is empty
+    #[allow(dead_code)]  // Reserved for future empty stack checks
     pub fn is_empty(&self) -> bool {
         self.quantity == 0
     }

@@ -48,6 +48,7 @@ impl ItemDefinition {
     }
 
     /// Returns true if this item can stack with another
+    #[allow(dead_code)]  // Reserved for future item comparison features
     pub fn can_stack_with(&self, other: &ItemDefinition) -> bool {
         // Items can only stack if they're the same type and stackable
         self.id == other.id && self.max_stack_size > 1

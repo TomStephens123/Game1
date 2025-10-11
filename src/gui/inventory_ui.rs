@@ -349,6 +349,7 @@ impl<'a> InventoryUI<'a> {
         Rect::new(start_x as i32, start_y as i32, inventory_width, inventory_height)
     }
 
+    #[allow(dead_code)]  // Reserved for future tooltip/hover feature
     pub fn is_mouse_over_inventory_window(&self, mouse_x: i32, mouse_y: i32, screen_width: u32, screen_height: u32) -> bool {
         if !self.is_open {
             return false;

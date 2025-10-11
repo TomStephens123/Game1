@@ -54,6 +54,7 @@ impl Inventory {
     }
 
     /// Finds the first slot containing a specific item with room to stack
+    #[allow(dead_code)]  // Reserved for future smart stacking feature
     pub fn find_stackable_slot(
         &self,
         item_id: &str,
@@ -165,6 +166,7 @@ impl Inventory {
     /// Removes a specific quantity from a specific slot
     ///
     /// Returns the removed ItemStack, or None if slot is empty.
+    #[allow(dead_code)]  // Reserved for future inventory management features
     pub fn take_from_slot(&mut self, slot_index: usize, quantity: u32) -> Option<ItemStack> {
         if slot_index >= self.capacity {
             return None;

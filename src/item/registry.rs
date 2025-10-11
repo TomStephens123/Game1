@@ -60,6 +60,7 @@ impl ItemRegistry {
     }
 
     /// Returns true if an item with this ID exists
+    #[allow(dead_code)]  // Reserved for validation/debugging features
     pub fn exists(&self, id: &str) -> bool {
         self.items.contains_key(id)
     }

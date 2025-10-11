@@ -109,6 +109,7 @@ impl FloatingText {
     }
 
     /// Creates a floating text renderer with custom styling
+    #[allow(dead_code)]  // Reserved for future custom text styles
     pub fn with_style(style: FloatingTextStyle) -> Self {
         FloatingText { style }
     }
