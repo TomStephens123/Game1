@@ -45,3 +45,6 @@ pub mod death_screen;
 pub use menu::{Menu, MenuItem};
 pub use save_exit_menu::{SaveExitMenu, SaveExitOption};
 pub use death_screen::DeathScreen;
+
+pub mod inventory_ui;
+pub use inventory_ui::InventoryUI;

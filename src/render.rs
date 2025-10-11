@@ -25,6 +25,7 @@ use crate::player::Player;
 use crate::slime::Slime;
 use crate::collision::StaticObject;
 use crate::the_entity::TheEntity;
+use crate::dropped_item::DroppedItem;
 use sdl2::render::Canvas;
 use sdl2::video::Window;
 
@@ -71,6 +72,7 @@ pub enum Renderable<'a> {
     Slime(&'a Slime<'a>),
     StaticObject(&'a StaticObject),
     TheEntity(&'a TheEntity<'a>),
+    DroppedItem(&'a DroppedItem<'a>),
 }
 
 impl<'a> Renderable<'a> {
@@ -94,6 +96,7 @@ impl<'a> Renderable<'a> {
             Renderable::Slime(s) => s.render(canvas),
             Renderable::StaticObject(obj) => obj.render(canvas),
             Renderable::TheEntity(e) => e.render(canvas),
+            Renderable::DroppedItem(item) => item.render(canvas),
         }
     }
 }
@@ -138,11 +141,12 @@ pub fn render_with_depth_sorting(
     slimes: &[Slime],
     static_objects: &[StaticObject],
     entities: &[TheEntity],
+    dropped_items: &[DroppedItem],
 ) -> Result<(), String> {
     // Collect all renderables with their depth
     // Rust Learning: Vec::with_capacity() pre-allocates to avoid reallocation
     let mut renderables: Vec<(i32, Renderable)> = Vec::with_capacity(
-        1 + slimes.len() + static_objects.len() + entities.len()
+        1 + slimes.len() + static_objects.len() + entities.len() + dropped_items.len()
     );
 
     // Add player
@@ -161,6 +165,11 @@ pub fn render_with_depth_sorting(
     // Add entities
     for entity in entities {
         renderables.push((entity.get_depth_y(), Renderable::TheEntity(entity)));
+    }
+
+    // Add dropped items
+    for item in dropped_items {
+        renderables.push((item.get_depth_y(), Renderable::DroppedItem(item)));
     }
 
     // Sort by Y-coordinate (painter's algorithm)

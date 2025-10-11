@@ -7,7 +7,10 @@ mod animation;
 mod attack_effect;
 mod collision;
 mod combat;
+mod dropped_item;
 mod gui;
+mod inventory;
+mod item;
 mod player;
 mod render;
 mod save;
@@ -26,11 +29,15 @@ use collision::{
     StaticCollidable, StaticObject,
 };
 use combat::{DamageEvent, DamageSource};
-use gui::{SaveExitMenu, SaveExitOption, DeathScreen};
+use dropped_item::DroppedItem;
+use gui::{SaveExitMenu, SaveExitOption, DeathScreen, InventoryUI};
+use inventory::PlayerInventory;
+use item::ItemRegistry;
 use player::Player;
 use render::render_with_depth_sorting;
 use save::{SaveManager, SaveFile, SaveMetadata, SaveType, WorldSaveData, EntitySaveData, Saveable, SaveData, CURRENT_SAVE_VERSION};
 use slime::Slime;
+use sprite::SpriteSheet;
 use stats::{ModifierEffect, StatModifier, StatType};
 use text::draw_simple_text;
 use the_entity::{TheEntity, EntityState, EntityType};
@@ -38,6 +45,7 @@ use tile::{TileId, WorldGrid, RenderGrid};
 use ui::{HealthBar, HealthBarStyle, FloatingText, BuffDisplay};
 use std::time::{SystemTime, Instant};
 use serde::Deserialize;
+use std::collections::HashMap;
 
 // Game resolution constants
 const GAME_WIDTH: u32 = 640;
@@ -175,7 +183,8 @@ fn load_game<'a>(
     character_texture: &'a sdl2::render::Texture<'a>,
     slime_texture: &'a sdl2::render::Texture<'a>,
     entity_texture: &'a sdl2::render::Texture<'a>,
-) -> Result<(Player<'a>, Vec<Slime<'a>>, WorldGrid, Vec<TheEntity<'a>>), String> {
+    item_textures: &'a HashMap<String, sdl2::render::Texture<'a>>,
+) -> Result<(Player<'a>, Vec<Slime<'a>>, WorldGrid, Vec<TheEntity<'a>>, PlayerInventory, Vec<DroppedItem<'a>>), String> {
     // Load save file from slot 1
     let save_file = save_manager.load_game(1)
         .map_err(|e| format!("Failed to load save: {}", e))?;
@@ -197,11 +206,12 @@ fn load_game<'a>(
     let mut player: Option<Player> = None;
     let mut slimes: Vec<Slime> = Vec::new();
     let mut loaded_entities: Vec<TheEntity> = Vec::new();
+    let mut player_inventory = PlayerInventory::new();
+    let mut dropped_items = Vec::new();
 
     for entity_data in save_file.entities {
         match entity_data.entity_type.as_str() {
             "player" => {
-                // Deserialize player
                 let save_data = SaveData {
                     data_type: "player".to_string(),
                     json_data: entity_data.data,
@@ -210,7 +220,6 @@ fn load_game<'a>(
                 let mut loaded_player = Player::from_save_data(&save_data)
                     .map_err(|e| format!("Failed to load player: {}", e))?;
 
-                // Set up animation controller with textures
                 let animation_controller = player_config.create_controller(
                     character_texture,
                     &["idle", "running", "attack", "damage", "death"],
@@ -221,7 +230,6 @@ fn load_game<'a>(
                 println!("  - Loaded player at ({}, {})", entity_data.position.0, entity_data.position.1);
             }
             "slime" => {
-                // Deserialize slime
                 let save_data = SaveData {
                     data_type: "slime".to_string(),
                     json_data: entity_data.data,
@@ -230,7 +238,6 @@ fn load_game<'a>(
                 let mut loaded_slime = Slime::from_save_data(&save_data)
                     .map_err(|e| format!("Failed to load slime: {}", e))?;
 
-                // Set up animation controller with textures
                 let slime_animation_controller = slime_config.create_controller(
                     slime_texture,
                     &["slime_idle", "jump", "slime_damage", "slime_death"],
@@ -240,7 +247,6 @@ fn load_game<'a>(
                 slimes.push(loaded_slime);
             }
             "the_entity" => {
-                // Manually deserialize entity since it needs texture setup
                 #[derive(Deserialize)]
                 struct EntitySaveData {
                     id: usize,
@@ -255,23 +261,40 @@ fn load_game<'a>(
                 let saved_entity: EntitySaveData = serde_json::from_str(&entity_data.data)
                     .map_err(|e| format!("Failed to deserialize entity: {}", e))?;
 
-                // Create sprite sheet with all 13 frames
                 let mut frames = Vec::new();
                 for i in 0..13 {
                     frames.push(sprite::Frame::new(i * 32, 0, 32, 32, 100));
                 }
                 let sprite_sheet = sprite::SpriteSheet::new(entity_texture, frames);
 
-                // Create entity and restore state
                 let mut loaded_entity = TheEntity::new(saved_entity.id, saved_entity.x, saved_entity.y, saved_entity.entity_type, sprite_sheet);
                 loaded_entity.state = saved_entity.state;
                 loaded_entity.awakening_frame = saved_entity.awakening_frame;
                 loaded_entity.inactivity_timer = saved_entity.inactivity_timer;
 
-                // Update sprite frame to match restored state
                 loaded_entity.update_sprite_frame();
 
                 loaded_entities.push(loaded_entity);
+            }
+            "player_inventory" => {
+                player_inventory = serde_json::from_str(&entity_data.data).map_err(|e| format!("Failed to load player inventory: {}", e))?;
+            }
+            "dropped_item" => {
+                let save_data = SaveData {
+                    data_type: "dropped_item".to_string(),
+                    json_data: entity_data.data,
+                };
+                let mut item = DroppedItem::from_save_data(&save_data).map_err(|e| e.to_string())?;
+                let mut item_animation_controller = animation::AnimationController::new();
+                let item_frames = vec![
+                    sprite::Frame::new(0, 0, 32, 32, 300),
+                ];
+                let item_texture = item_textures.get(&item.item_id).ok_or(format!("Missing texture for item {}", item.item_id))?;
+                let item_sprite_sheet = SpriteSheet::new(item_texture, item_frames);
+                item_animation_controller.add_animation("item_idle".to_string(), item_sprite_sheet);
+                item_animation_controller.set_state("item_idle".to_string());
+                item.set_animation_controller(item_animation_controller);
+                dropped_items.push(item);
             }
             unknown => {
                 eprintln!("Warning: Unknown entity type '{}', skipping", unknown);
@@ -284,7 +307,7 @@ fn load_game<'a>(
     println!("  - Loaded {} entities", loaded_entities.len());
     println!("✓ Game loaded successfully!");
 
-    Ok((player, slimes, world_grid, loaded_entities))
+    Ok((player, slimes, world_grid, loaded_entities, player_inventory, dropped_items))
 }
 
 /// Save the current game state
@@ -294,11 +317,11 @@ fn save_game(
     slimes: &[Slime],
     world_grid: &WorldGrid,
     the_entities: &[TheEntity],
+    player_inventory: &PlayerInventory,
+    dropped_items: &[DroppedItem],
 ) -> Result<(), String> {
-    // Collect entity save data
     let mut entities_vec = Vec::new();
 
-    // Save player (entity_id = 0)
     let player_save_data = player.to_save_data()
         .map_err(|e| format!("Failed to save player: {}", e))?;
 
@@ -309,7 +332,6 @@ fn save_game(
         data: player_save_data.json_data,
     });
 
-    // Save slimes (entity_id starts from 1)
     let mut next_id = 1;
     for (i, slime) in slimes.iter().enumerate() {
         let slime_save_data = slime.to_save_data()
@@ -324,7 +346,6 @@ fn save_game(
     }
     next_id += slimes.len();
 
-    // Save entities (TheEntity pyramids)
     for entity in the_entities.iter() {
         let entity_save_data = entity.to_save_data()
             .map_err(|e| format!("Failed to save entity {}: {}", entity.id, e))?;
@@ -336,22 +357,38 @@ fn save_game(
             data: entity_save_data.json_data,
         });
     }
+    next_id += the_entities.len();
 
-    // Create world save data
+    let inventory_data = serde_json::to_string(player_inventory).map_err(|e| format!("Failed to serialize player inventory: {}", e))?;
+    entities_vec.push(EntitySaveData {
+        entity_id: u64::MAX - 1, // Special ID for inventory
+        entity_type: "player_inventory".to_string(),
+        position: (0, 0),
+        data: inventory_data,
+    });
+
+    for (i, item) in dropped_items.iter().enumerate() {
+        let item_save_data = item.to_save_data().map_err(|e| format!("Failed to save dropped item: {}", e))?;
+        entities_vec.push(EntitySaveData {
+            entity_id: (next_id + i) as u64,
+            entity_type: "dropped_item".to_string(),
+            position: (item.x, item.y),
+            data: item_save_data.json_data,
+        });
+    }
+
     let world_state = WorldSaveData {
         width: world_grid.width,
         height: world_grid.height,
         tiles: world_grid.to_save_data(),
     };
 
-    // Save counts for debug output
     let entity_count = entities_vec.len();
     let slime_count = slimes.len();
     let entity_pyramid_count = the_entities.len();
     let world_width = world_state.width;
     let world_height = world_state.height;
 
-    // Create save file
     let save_file = SaveFile {
         version: CURRENT_SAVE_VERSION,
         timestamp: SystemTime::now(),
@@ -366,7 +403,6 @@ fn save_game(
         entities: entities_vec,
     };
 
-    // Save to file
     save_manager.save_game(&save_file)
         .map_err(|e| format!("Save failed: {}", e))?;
 
@@ -376,9 +412,6 @@ fn save_game(
     Ok(())
 }
 
-// Simple helper draw_simple_text has been moved to src/text.rs
-// render_exit_menu has been replaced by SaveExitMenu component in src/gui/
-
 /// Render the debug stats menu overlay
 fn render_debug_menu(
     canvas: &mut sdl2::render::Canvas<sdl2::video::Window>,
@@ -386,19 +419,16 @@ fn render_debug_menu(
     debug_config: &DebugConfig,
     selected_index: usize,
 ) -> Result<(), String> {
-    // Semi-transparent overlay
     canvas.set_blend_mode(sdl2::render::BlendMode::Blend);
     canvas.set_draw_color(sdl2::pixels::Color::RGBA(0, 0, 0, 200));
     canvas.fill_rect(None)?;
     canvas.set_blend_mode(sdl2::render::BlendMode::None);
 
-    // Menu box dimensions (scaled for 640x360 viewport)
     let menu_width = 380;
     let menu_height = 260;
     let menu_x = (GAME_WIDTH - menu_width) / 2;
     let menu_y = (GAME_HEIGHT - menu_height) / 2;
 
-    // Menu background
     canvas.set_draw_color(sdl2::pixels::Color::RGB(20, 20, 30));
     canvas.fill_rect(sdl2::rect::Rect::new(
         menu_x as i32,
@@ -407,7 +437,6 @@ fn render_debug_menu(
         menu_height,
     ))?;
 
-    // Menu border
     canvas.set_draw_color(sdl2::pixels::Color::RGB(80, 120, 180));
     canvas.draw_rect(sdl2::rect::Rect::new(
         menu_x as i32,
@@ -422,7 +451,6 @@ fn render_debug_menu(
         menu_height - 4,
     ))?;
 
-    // Title (centered)
     draw_simple_text(
         canvas,
         "DEBUG STATS",
@@ -432,7 +460,6 @@ fn render_debug_menu(
         2,
     )?;
 
-    // Subtitle (centered)
     draw_simple_text(
         canvas,
         "F3 TO CLOSE",
@@ -442,7 +469,6 @@ fn render_debug_menu(
         1,
     )?;
 
-    // Menu items
     let items = DebugMenuItem::all();
     let item_y_start = menu_y + 60;
     let item_height = 35;
@@ -451,7 +477,6 @@ fn render_debug_menu(
         let item_y = item_y_start + (i as u32 * item_height);
         let is_selected = i == selected_index;
 
-        // Selection highlight
         if is_selected {
             canvas.set_draw_color(sdl2::pixels::Color::RGB(40, 60, 100));
             canvas.fill_rect(sdl2::rect::Rect::new(
@@ -462,7 +487,6 @@ fn render_debug_menu(
             ))?;
         }
 
-        // Item name
         let text_color = if is_selected {
             sdl2::pixels::Color::RGB(255, 255, 255)
         } else {
@@ -478,7 +502,6 @@ fn render_debug_menu(
             2,
         )?;
 
-        // Item value
         let value_text = match item {
             DebugMenuItem::PlayerMaxHealth => format!("{}", player.stats.max_health as i32),
             DebugMenuItem::PlayerAttackDamage => format!("{}", player.stats.attack_damage as i32),
@@ -496,7 +519,6 @@ fn render_debug_menu(
             2,
         )?;
 
-        // Arrow indicators for selected item
         if is_selected {
             draw_simple_text(
                 canvas,
@@ -517,7 +539,6 @@ fn render_debug_menu(
         }
     }
 
-    // Controls hint
     draw_simple_text(
         canvas,
         "ARROWS   NAVIGATE",
@@ -543,7 +564,6 @@ fn main() -> Result<(), String> {
     let video_subsystem = sdl_context.video()?;
     let _image_context = sdl2::image::init(sdl2::image::InitFlag::PNG)?;
 
-    // Calculate window scale based on monitor size
     let window_scale = calculate_window_scale(&video_subsystem);
     let window_width = GAME_WIDTH * window_scale;
     let window_height = GAME_HEIGHT * window_scale;
@@ -558,13 +578,11 @@ fn main() -> Result<(), String> {
 
     let mut canvas = window.into_canvas().build().map_err(|e| e.to_string())?;
 
-    // Set logical size for automatic pixel-perfect scaling
     canvas.set_logical_size(GAME_WIDTH, GAME_HEIGHT).map_err(|e| e.to_string())?;
 
     let texture_creator = canvas.texture_creator();
     let mut event_pump = sdl_context.event_pump()?;
 
-    // Load animation configurations
     let player_config = AnimationConfig::load_from_file("assets/config/player_animations.json")
         .map_err(|e| format!("Failed to load player animation config: {}", e))?;
     let slime_config = AnimationConfig::load_from_file("assets/config/slime_animations.json")
@@ -572,55 +590,40 @@ fn main() -> Result<(), String> {
     let punch_config = AnimationConfig::load_from_file("assets/config/punch_effect.json")
         .map_err(|e| format!("Failed to load punch effect config: {}", e))?;
 
-    // Animation system loaded successfully
-
-    // Load sprite textures
     let character_texture = load_texture(&texture_creator, "assets/sprites/new_player/Character-Base.png")?;
     let slime_texture = load_texture(&texture_creator, "assets/sprites/slime/Slime.png")?;
     let _background_texture = load_texture(&texture_creator, "assets/backgrounds/background_meadow.png")?;
     let punch_texture = load_texture(&texture_creator, "assets/sprites/new_player/punch_effect.png")?;
     let grass_tile_texture = load_texture(&texture_creator, "assets/backgrounds/tileable/grass_tile.png")?;
 
-    // Tile placement state
-    let mut selected_tile = TileId::Grass;
-    let mut is_painting = false; // Track if mouse button is held down
-    let mut last_painted_tile: Option<(i32, i32)> = None; // Prevent painting same tile multiple times
+    let item_registry = ItemRegistry::create_default();
+    println!("✓ Item registry initialized");
 
-    // Vector to store active attack effects (punch visuals)
-    let mut attack_effects: Vec<AttackEffect> = Vec::new();
+    let mut item_textures = HashMap::new();
+    for item_def in item_registry.all_items() {
+        let texture = load_texture(&texture_creator, &item_def.sprite_path)?;
+        item_textures.insert(item_def.id.clone(), texture);
+    }
+    println!("✓ Loaded {} item textures", item_textures.len());
 
-    // Store the current attack event for hit detection
-    let mut active_attack: Option<combat::AttackEvent> = None;
-
-    // Debug toggle for collision visualization
-    let mut show_collision_boxes = false;
-
-    // Debug toggle for tile grid visualization
-    let mut show_tile_grid = false;
-
-    // Save system
     let save_dir = dirs::home_dir()
         .map(|p| p.join(".game1/saves"))
         .unwrap_or_else(|| std::path::PathBuf::from("./saves"));
     let mut save_manager = SaveManager::new(&save_dir)
         .map_err(|e| format!("Failed to create save manager: {}", e))?;
 
-    // Load entity texture
     let entity_texture = load_texture(&texture_creator, "assets/sprites/the_entity/entity_awaken.png")?;
 
-    // Try to load existing save on startup
-    let (mut player, mut slimes, mut world_grid, mut render_grid, mut entities) =
-        match load_game(&save_manager, &player_config, &slime_config, &character_texture, &slime_texture, &entity_texture) {
-            Ok((loaded_player, loaded_slimes, loaded_world, loaded_entities)) => {
+    let (mut player, mut slimes, mut world_grid, mut render_grid, mut entities, mut player_inventory, mut dropped_items) =
+        match load_game(&save_manager, &player_config, &slime_config, &character_texture, &slime_texture, &entity_texture, &item_textures) {
+            Ok((loaded_player, loaded_slimes, loaded_world, loaded_entities, loaded_inventory, loaded_items)) => {
                 println!("✓ Loaded existing save!");
                 let loaded_render_grid = RenderGrid::new(&loaded_world);
-                (loaded_player, loaded_slimes, loaded_world, loaded_render_grid, loaded_entities)
+                (loaded_player, loaded_slimes, loaded_world, loaded_render_grid, loaded_entities, loaded_inventory, loaded_items)
             }
             Err(_) => {
-                // No save exists, create new game
                 println!("No existing save found, starting new game");
 
-                // Setup player with animations
                 let animation_controller = player_config.create_controller(
                     &character_texture,
                     &["idle", "running", "attack", "damage", "death"],
@@ -628,17 +631,14 @@ fn main() -> Result<(), String> {
                 let mut new_player = Player::new(300, 200, 32, 32, 3);
                 new_player.set_animation_controller(animation_controller);
 
-                // Create world grid (40x24 tiles, default to grass)
                 let new_world_grid = WorldGrid::new(40, 24, TileId::Grass);
                 let new_render_grid = RenderGrid::new(&new_world_grid);
 
-                // Spawn 4 entities at fixed locations for new game
-                // Each entity provides a different buff when awakened
                 let entity_spawn_data = [
-                    (160, 120, EntityType::Attack),       // Top-left: +1 attack damage
-                    (480, 120, EntityType::Defense),      // Top-right: +1 defense
-                    (160, 240, EntityType::Speed),        // Bottom-left: +1 movement speed
-                    (480, 240, EntityType::Regeneration), // Bottom-right: +2 HP every 5 seconds
+                    (160, 120, EntityType::Attack),
+                    (480, 120, EntityType::Defense),
+                    (160, 240, EntityType::Speed),
+                    (480, 240, EntityType::Regeneration),
                 ];
 
                 let mut new_entities: Vec<TheEntity> = Vec::new();
@@ -651,42 +651,33 @@ fn main() -> Result<(), String> {
                     new_entities.push(TheEntity::new(id, *x, *y, *entity_type, sprite_sheet));
                 }
 
-                (new_player, Vec::new(), new_world_grid, new_render_grid, new_entities)
+                (new_player, Vec::new(), new_world_grid, new_render_grid, new_entities, PlayerInventory::new(), Vec::new())
             }
         };
 
-    // Game state for menu handling
     let mut game_state = GameState::Playing;
 
-    // Debug menu state
     let mut debug_menu_state = DebugMenuState::Closed;
     let mut debug_config = DebugConfig::new();
 
-    // UI Components: Health bars (world-space HUD)
-    let player_health_bar = HealthBar::new(); // Default green health bar
+    let player_health_bar = HealthBar::new();
     let enemy_health_bar = HealthBar::with_style(HealthBarStyle {
-        health_color: Color::RGB(150, 0, 150), // Purple for enemies
+        health_color: Color::RGB(150, 0, 150),
         low_health_color: Color::RGB(200, 0, 0),
         ..Default::default()
     });
     let floating_text_renderer = FloatingText::new();
     let buff_display = BuffDisplay::new(&texture_creator)?;
 
-    // GUI Components: Screen-space menus
     let mut save_exit_menu = SaveExitMenu::new();
     let mut death_screen = DeathScreen::new();
+    let mut inventory_ui = InventoryUI::new();
 
-    // Window boundary collision - invisible walls at screen edges
-    // Made 10px thick to reliably catch player hitbox
     let boundary_thickness = 10;
     let static_objects = vec![
-        // Top boundary
         StaticObject::new(0, -(boundary_thickness as i32), GAME_WIDTH, boundary_thickness),
-        // Left boundary
         StaticObject::new(-(boundary_thickness as i32), 0, boundary_thickness, GAME_HEIGHT),
-        // Right boundary
         StaticObject::new(GAME_WIDTH as i32, 0, boundary_thickness, GAME_HEIGHT),
-        // Bottom boundary
         StaticObject::new(0, GAME_HEIGHT as i32, GAME_WIDTH, boundary_thickness),
     ];
 
@@ -712,18 +703,22 @@ fn main() -> Result<(), String> {
     println!("- Touching slimes without attacking damages player (10 HP total)");
     println!("- 1 second invulnerability after taking damage");
 
-    // Regeneration timer for the Regeneration pyramid buff
     let mut regen_timer = Instant::now();
-    let regen_interval = 5.0; // Heal every 5 seconds
+    let regen_interval = 5.0;
 
-    // Floating text tracking for heal indicators
     let mut floating_texts: Vec<FloatingTextInstance> = Vec::new();
 
-    // Track if regeneration is active (for buff display)
     let mut has_regen = false;
 
+    let mut active_attack: Option<combat::AttackEvent> = None;
+    let mut attack_effects: Vec<AttackEffect> = Vec::new();
+    let mut selected_tile = TileId::Grass;
+    let mut is_painting = false;
+    let mut last_painted_tile: Option<(i32, i32)> = None;
+    let mut show_collision_boxes = false;
+    let mut show_tile_grid = false;
+
     'running: loop {
-        // Handle events
         for event in event_pump.poll_iter() {
             match event {
                 Event::Quit { .. } => break 'running,
@@ -733,15 +728,12 @@ fn main() -> Result<(), String> {
                 } => {
                     match game_state {
                         GameState::Playing => {
-                            // Open exit menu
                             game_state = GameState::ExitMenu;
                         }
                         GameState::ExitMenu => {
-                            // Close menu (Cancel)
                             game_state = GameState::Playing;
                         }
                         GameState::Dead => {
-                            // Allow opening exit menu during death
                             game_state = GameState::ExitMenu;
                             death_screen.reset();
                         }
@@ -765,7 +757,7 @@ fn main() -> Result<(), String> {
                 } if game_state == GameState::ExitMenu => {
                     match save_exit_menu.selected_option() {
                         SaveExitOption::SaveAndExit => {
-                            if let Err(e) = save_game(&mut save_manager, &player, &slimes, &world_grid, &entities) {
+                            if let Err(e) = save_game(&mut save_manager, &player, &slimes, &world_grid, &entities, &player_inventory, &dropped_items) {
                                 eprintln!("Failed to save: {}", e);
                             }
                             break 'running;
@@ -779,8 +771,7 @@ fn main() -> Result<(), String> {
                     keycode: Some(Keycode::F5),
                     ..
                 } if game_state == GameState::Playing => {
-                    // Quick save
-                    if let Err(e) = save_game(&mut save_manager, &player, &slimes, &world_grid, &entities) {
+                    if let Err(e) = save_game(&mut save_manager, &player, &slimes, &world_grid, &entities, &player_inventory, &dropped_items) {
                         eprintln!("Failed to save: {}", e);
                     }
                 }
@@ -788,14 +779,15 @@ fn main() -> Result<(), String> {
                     keycode: Some(Keycode::F9),
                     ..
                 } if game_state == GameState::Playing => {
-                    // Load game
-                    match load_game(&save_manager, &player_config, &slime_config, &character_texture, &slime_texture, &entity_texture) {
-                        Ok((loaded_player, loaded_slimes, loaded_world, loaded_entities)) => {
+                    match load_game(&save_manager, &player_config, &slime_config, &character_texture, &slime_texture, &entity_texture, &item_textures) {
+                        Ok((loaded_player, loaded_slimes, loaded_world, loaded_entities, loaded_inventory, loaded_items)) => {
                             player = loaded_player;
                             slimes = loaded_slimes;
                             world_grid = loaded_world;
                             render_grid = RenderGrid::new(&world_grid);
                             entities = loaded_entities;
+                            player_inventory = loaded_inventory;
+                            dropped_items = loaded_items;
                             attack_effects.clear();
                             active_attack = None;
                             println!("✓ Game loaded successfully!");
@@ -809,7 +801,6 @@ fn main() -> Result<(), String> {
                     keycode: Some(Keycode::F3),
                     ..
                 } if game_state == GameState::Playing => {
-                    // Toggle debug menu
                     debug_menu_state = match debug_menu_state {
                         DebugMenuState::Closed => {
                             println!("Debug menu: OPEN");
@@ -825,7 +816,6 @@ fn main() -> Result<(), String> {
                     keycode: Some(Keycode::Up),
                     ..
                 } if matches!(debug_menu_state, DebugMenuState::Open { .. }) => {
-                    // Navigate up in debug menu
                     if let DebugMenuState::Open { selected_index } = debug_menu_state {
                         let items = DebugMenuItem::all();
                         let new_index = if selected_index == 0 {
@@ -840,7 +830,6 @@ fn main() -> Result<(), String> {
                     keycode: Some(Keycode::Down),
                     ..
                 } if matches!(debug_menu_state, DebugMenuState::Open { .. }) => {
-                    // Navigate down in debug menu
                     if let DebugMenuState::Open { selected_index } = debug_menu_state {
                         let items = DebugMenuItem::all();
                         let new_index = (selected_index + 1) % items.len();
@@ -852,7 +841,6 @@ fn main() -> Result<(), String> {
                     keymod,
                     ..
                 } if matches!(debug_menu_state, DebugMenuState::Open { .. }) => {
-                    // Decrease stat value
                     if let DebugMenuState::Open { selected_index } = debug_menu_state {
                         let items = DebugMenuItem::all();
                         let item = items[selected_index];
@@ -885,7 +873,6 @@ fn main() -> Result<(), String> {
                     keymod,
                     ..
                 } if matches!(debug_menu_state, DebugMenuState::Open { .. }) => {
-                    // Increase stat value
                     if let DebugMenuState::Open { selected_index } = debug_menu_state {
                         let items = DebugMenuItem::all();
                         let item = items[selected_index];
@@ -917,14 +904,10 @@ fn main() -> Result<(), String> {
                     keycode: Some(Keycode::M),
                     ..
                 } => {
-                    // Attempt to attack (returns None if on cooldown)
                     if let Some(attack_event) = player.start_attack() {
-                        // Store attack for hit detection
                         active_attack = Some(attack_event.clone());
 
-                        // Spawn punch effect in front of player based on their direction
-                        // Calculate offset to position punch effect adjacent to player
-                        let offset = 20;  // Fixed offset for punch positioning
+                        let offset = 20;
                         let (offset_x, offset_y) = match player.direction {
                             crate::animation::Direction::North => (0, -offset),
                             crate::animation::Direction::NorthEast => (offset, -offset),
@@ -971,6 +954,12 @@ fn main() -> Result<(), String> {
                     println!("Tile grid debug: {}", if show_tile_grid { "ON" } else { "OFF" });
                 }
                 Event::KeyDown {
+                    keycode: Some(Keycode::I),
+                    ..
+                } => {
+                    inventory_ui.toggle();
+                }
+                Event::KeyDown {
                     keycode: Some(Keycode::Num1),
                     ..
                 } => {
@@ -983,29 +972,24 @@ fn main() -> Result<(), String> {
                     selected_tile = TileId::Dirt;
                 }
                 Event::MouseButtonDown { mouse_btn: sdl2::mouse::MouseButton::Left, x, y, .. } => {
-                    // Left click: Start painting
                     is_painting = true;
                     let tile_x = x / 32;
                     let tile_y = y / 32;
 
-                    // Place initial tile
                     if world_grid.set_tile(tile_x, tile_y, selected_tile) {
                         render_grid.update_tile_and_neighbors(&world_grid, tile_x, tile_y);
                         last_painted_tile = Some((tile_x, tile_y));
                     }
                 }
                 Event::MouseButtonUp { mouse_btn: sdl2::mouse::MouseButton::Left, .. } => {
-                    // Release left mouse: Stop painting
                     is_painting = false;
                     last_painted_tile = None;
                 }
                 Event::MouseMotion { x, y, .. } => {
-                    // Handle painting while dragging
                     if is_painting {
                         let tile_x = x / 32;
                         let tile_y = y / 32;
 
-                        // Only paint if we've moved to a different tile
                         if last_painted_tile != Some((tile_x, tile_y)) {
                             if world_grid.set_tile(tile_x, tile_y, selected_tile) {
                                 render_grid.update_tile_and_neighbors(&world_grid, tile_x, tile_y);
@@ -1015,89 +999,64 @@ fn main() -> Result<(), String> {
                     }
                 }
                 Event::MouseButtonDown { mouse_btn: sdl2::mouse::MouseButton::Right, x, y, .. } => {
-                    // Spawn a new slime at mouse position
-                    // Using factory method - clean and simple!
                     let slime_animation_controller = slime_config.create_controller(
                         &slime_texture,
                         &["slime_idle", "jump", "slime_damage", "slime_death"],
                     )?;
-                    // Center slime on click (32 * SPRITE_SCALE / 2 = offset)
                     let center_offset = (32 * SPRITE_SCALE / 2) as i32;
                     let mut new_slime = Slime::new(x - center_offset, y - center_offset, slime_animation_controller);
-                    // Apply debug config health
                     new_slime.health = debug_config.slime_base_health;
                     slimes.push(new_slime);
                 }
-                _ => {}
+                _ => {} // Ignore other events
             }
         }
 
-        // Only update game state when not in menu
         if game_state == GameState::Playing {
-            // Check for player death
             if player.state.is_dead() {
                 game_state = GameState::Dead;
                 death_screen.trigger();
                 println!("Player died!");
             }
 
-            // Update player
             let keyboard_state = event_pump.keyboard_state();
             player.update(&keyboard_state);
-            // Bounds handled by collision system with static boundary objects
 
-            // Attack hit detection
-            // IMPORTANT: Process attacks BEFORE slime updates to ensure invulnerability
-            // timing is correct. This prevents slimes from being hit on the same frame
-            // their damage animation finishes.
             if let Some(ref attack) = active_attack {
                 let attack_hitbox = attack.get_hitbox();
 
                 for slime in &mut slimes {
                     let slime_bounds = slime.get_bounds();
 
-                    // Check if attack hitbox intersects with slime
                     if collision::aabb_intersect(&attack_hitbox, &slime_bounds) {
-                        // Hit! Deal damage to slime
                         slime.take_damage(attack.damage as i32);
                     }
                 }
 
-                // Check entity hits
                 for entity in &mut entities {
                     entity.check_hit(&attack_hitbox);
                 }
 
-                // Clear attack after processing (attacks are one-frame)
                 active_attack = None;
             }
 
-            // Update slimes AFTER attack processing
-            // This ensures behavior state changes (TakingDamage -> Idle) happen
-            // after invulnerability checks, preventing same-frame hits
             for slime in &mut slimes {
                 slime.update();
             }
 
-            // Update entities
-            // Delta time approximation for ~60 FPS
             let delta_time = 1.0 / 60.0;
             for entity in &mut entities {
                 entity.update(delta_time);
             }
 
-            // Update floating texts (move up and fade out)
             for text in &mut floating_texts {
                 text.lifetime += delta_time;
-                text.y -= 20.0 * delta_time; // Rise upward
+                text.y -= 20.0 * delta_time;
             }
-            // Remove expired floating texts
             floating_texts.retain(|text| text.lifetime < text.max_lifetime);
 
-            // Apply buffs from awake entities
-            // Build a list of modifier effects based on which entities are awake
             player.active_modifiers.clear();
-            has_regen = false; // Reset each frame
+            has_regen = false;
             for entity in &entities {
                 if entity.state == EntityState::Awake {
                     match entity.entity_type {
@@ -1126,38 +1085,32 @@ fn main() -> Result<(), String> {
                             });
                         }
                         EntityType::Regeneration => {
-                            // Mark that regeneration is active
                             has_regen = true;
                         }
                     }
                 }
             }
 
-            // Handle regeneration timer
-            // Only heal if below max health to avoid any edge cases
             if has_regen && regen_timer.elapsed().as_secs_f32() >= regen_interval {
                 if player.stats.health.current() < player.stats.max_health {
-                    // Heal player by 2 HP (capped at max)
                     player.stats.health.heal(2.0);
 
-                    // Spawn floating "+2" text above player
                     floating_texts.push(FloatingTextInstance {
                         x: player.x as f32 + (player.width * SPRITE_SCALE) as f32 / 2.0,
                         y: player.y as f32,
                         text: "+2".to_string(),
-                        color: Color::RGB(0, 255, 0), // Green
+                        color: Color::RGB(0, 255, 0),
                         lifetime: 0.0,
-                        max_lifetime: 1.5, // Show for 1.5 seconds
+                        max_lifetime: 1.5,
                     });
 
-                    // Find the regeneration entity and spawn text above it too
                     for entity in &entities {
                         if entity.state == EntityState::Awake && entity.entity_type == EntityType::Regeneration {
                             floating_texts.push(FloatingTextInstance {
-                                x: entity.x as f32 + 16.0, // Center of 32px entity
+                                x: entity.x as f32 + 16.0,
                                 y: entity.y as f32,
                                 text: "+2".to_string(),
-                                color: Color::RGB(0, 255, 0), // Green
+                                color: Color::RGB(0, 255, 0),
                                 lifetime: 0.0,
                                 max_lifetime: 1.5,
                             });
@@ -1165,14 +1118,12 @@ fn main() -> Result<(), String> {
                         }
                     }
                 }
-                regen_timer = Instant::now(); // Reset timer
+                regen_timer = Instant::now();
             }
         }
 
-        // Check for respawn after death timer expires
         if game_state == GameState::Dead {
             if death_screen.should_respawn() {
-                // Respawn at world center
                 player.respawn(GAME_WIDTH as i32 / 2, GAME_HEIGHT as i32 / 2);
                 death_screen.reset();
                 game_state = GameState::Playing;
@@ -1180,55 +1131,95 @@ fn main() -> Result<(), String> {
             }
         }
 
-        // Update attack effects
         for effect in &mut attack_effects {
             effect.update();
         }
 
-        // Remove finished attack effects
         attack_effects.retain(|effect| !effect.is_finished());
 
-        // Collision detection and response (for pushing, not damage)
-        // Game loop pattern: Update → Collision → Render
-        //
-        // Rust Learning Note: Borrowing Challenge!
-        // We can't borrow `player` and `slimes` mutably at the same time in a simple loop.
-        // Solution: First detect collisions (immutable borrow), then resolve them (mutable).
         let colliding_slime_indices = check_collisions_with_collection(&player, &slimes);
 
-        // Resolve collisions with push-apart and damage from contact
-        // Strategy: Player is heavier, so slimes get pushed more (70/30 split)
         for slime_index in colliding_slime_indices {
             let player_bounds = player.get_bounds();
             let slime_bounds = slimes[slime_index].get_bounds();
 
             let (overlap_x, overlap_y) = calculate_overlap(&player_bounds, &slime_bounds);
 
-            // Use the axis with smaller overlap for push-apart (minimum separation)
             if overlap_x.abs() < overlap_y.abs() {
-                // Push apart on X axis
                 player.apply_push(-overlap_x * 3 / 10, 0);
                 slimes[slime_index].apply_push(overlap_x * 7 / 10, 0);
             } else {
-                // Push apart on Y axis
                 player.apply_push(0, -overlap_y * 3 / 10);
                 slimes[slime_index].apply_push(0, overlap_y * 7 / 10);
             }
 
-            // Contact damage: slime touches player (not while attacking, and slime must not be invulnerable)
-            // This prevents dying/damaged slimes from dealing damage
             if !player.is_attacking && !slimes[slime_index].is_invulnerable() {
                 let damage = DamageEvent::physical(debug_config.slime_contact_damage, DamageSource::Enemy);
                 player.take_damage(damage);
             }
         }
 
-        // Remove dead slimes
-        // Rust Learning: retain() is idiomatic for removing items from a Vec while iterating
+        for slime in &mut slimes {
+            if !slime.is_alive && !slime.has_dropped_loot {
+                slime.has_dropped_loot = true;
+                let mut item_animation_controller = animation::AnimationController::new();
+
+                let item_frames = vec![
+                    sprite::Frame::new(0, 0, 32, 32, 300),
+                ];
+
+                let item_texture = item_textures.get("slime_ball").ok_or("Missing slime_ball texture in item_textures map")?;
+
+                let item_sprite_sheet = SpriteSheet::new(item_texture, item_frames);
+
+                item_animation_controller.add_animation("item_idle".to_string(), item_sprite_sheet);
+                item_animation_controller.set_state("item_idle".to_string());
+
+                let dropped_item = DroppedItem::new(
+                    slime.x + 8,
+                    slime.y + 8,
+                    "slime_ball".to_string(),
+                    1,
+                    item_animation_controller,
+                );
+
+                dropped_items.push(dropped_item);
+                println!("Slime dropped slime_ball at ({}, {})", slime.x + 8, slime.y + 8);
+            }
+        }
+
         slimes.retain(|slime| slime.is_alive);
 
-        // Static object collision (walls, obstacles, and entities)
-        // One-way collision: only the player gets pushed, static objects never move
+        let player_bounds = player.get_bounds();
+        dropped_items.retain(|item| {
+            if !item.can_pickup {
+                return true; // Keep items in cooldown
+            }
+
+            if player_bounds.has_intersection(item.get_bounds()) {
+                match player_inventory.quick_add(&item.item_id, item.quantity, &item_registry) {
+                    Ok(overflow) => {
+                        if overflow == 0 {
+                            // Fully picked up
+                            println!("✓ Picked up {} x{}", item.item_id, item.quantity);
+                            false // Remove from world
+                        } else {
+                            println!("⚠ Inventory full! {} items couldn't fit", overflow);
+                            true // Keep in world
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to pickup item: {}", e);
+                        true // Keep in world on error
+                    }
+                }
+            } else {
+                true // Keep if not colliding
+            }
+        });
+
+        dropped_items.retain_mut(|item| !item.update()); // Remove if despawned
+
         let mut all_static_collidables: Vec<&dyn StaticCollidable> = Vec::new();
         for obj in &static_objects {
             all_static_collidables.push(obj);
@@ -1255,28 +1246,17 @@ fn main() -> Result<(), String> {
             }
         }
 
-        // Clear screen with black background
         canvas.set_draw_color(sdl2::pixels::Color::RGB(0, 0, 0));
         canvas.clear();
 
-        // Render background (old static background - can remove later)
-        // canvas.copy(&background_texture, None, None)?;
-
-        // Render tile world
         render_grid.render(&mut canvas, &grass_tile_texture)?;
 
-        // Render all entities with depth sorting
-        // This ensures entities layer correctly based on their Y position
-        // (entities farther back render first, creating proper 2.5D depth)
-        render_with_depth_sorting(&mut canvas, &player, &slimes, &static_objects, &entities)?;
+        render_with_depth_sorting(&mut canvas, &player, &slimes, &static_objects, &entities, &dropped_items)?;
 
-        // Render attack effects (on top of player/slimes to show attack range)
         for effect in &attack_effects {
             effect.render(&mut canvas, SPRITE_SCALE)?;
         }
 
-        // Render health bars (world-space HUD layer)
-        // Only show health bars if entity is alive
         if player.state.is_alive() {
             player_health_bar.render(
                 &mut canvas,
@@ -1301,7 +1281,6 @@ fn main() -> Result<(), String> {
             }
         }
 
-        // Render floating texts (heal indicators, damage numbers, etc.)
         for text in &floating_texts {
             let alpha = ((1.0 - text.lifetime / text.max_lifetime) * 255.0) as u8;
             floating_text_renderer.render(
@@ -1314,7 +1293,6 @@ fn main() -> Result<(), String> {
             )?;
         }
 
-        // Render buff display (screen-space UI - shows in top-left)
         if game_state == GameState::Playing {
             buff_display.render(
                 &mut canvas,
@@ -1323,27 +1301,22 @@ fn main() -> Result<(), String> {
             )?;
         }
 
-        // Debug: Render collision boxes (toggle with 'B' key)
         if show_collision_boxes {
             canvas.set_draw_color(sdl2::pixels::Color::RGBA(255, 0, 0, 128));
 
-            // Player collision box
             let player_bounds = player.get_bounds();
             canvas.draw_rect(player_bounds).map_err(|e| e.to_string())?;
 
-            // Slime collision boxes
             for slime in &slimes {
                 let slime_bounds = slime.get_bounds();
                 canvas.draw_rect(slime_bounds).map_err(|e| e.to_string())?;
             }
 
-            // TheEntity collision boxes
             for entity in &entities {
                 let entity_bounds = entity.get_bounds();
                 canvas.draw_rect(entity_bounds).map_err(|e| e.to_string())?;
             }
 
-            // Attack hitbox (if attacking)
             if let Some(ref attack) = active_attack {
                 canvas.set_draw_color(sdl2::pixels::Color::RGBA(0, 255, 0, 128));
                 let attack_hitbox = attack.get_hitbox();
@@ -1351,9 +1324,7 @@ fn main() -> Result<(), String> {
             }
         }
 
-        // Debug: Render tile grid (toggle with 'G' key)
         if show_tile_grid {
-            // Draw world grid lines (YELLOW)
             canvas.set_draw_color(sdl2::pixels::Color::RGBA(255, 255, 0, 128));
             for x in 0..=world_grid.width {
                 let line_x = (x * 32) as i32;
@@ -1370,7 +1341,6 @@ fn main() -> Result<(), String> {
                 ).map_err(|e| e.to_string())?;
             }
 
-            // Draw world tile type indicators (GREEN for grass, BROWN for dirt)
             for y in 0..world_grid.height {
                 for x in 0..world_grid.width {
                     if let Some(tile_id) = world_grid.get_tile(x as i32, y as i32) {
@@ -1391,9 +1361,7 @@ fn main() -> Result<(), String> {
             }
         }
 
-        // Debug info (optional)
-        if false {
-            // Set to true to see debug info
+        if false { // Set to true to see debug info
             println!(
                 "Player: pos=({}, {}), vel=({}, {}), state={:?}",
                 player.position().0,
@@ -1404,24 +1372,24 @@ fn main() -> Result<(), String> {
             );
         }
 
-        // Render death screen if dead
+        if game_state == GameState::Playing {
+            inventory_ui.render(&mut canvas, &player_inventory, &item_registry, &item_textures, player_inventory.selected_hotbar_slot)?;
+        }
+
         if game_state == GameState::Dead {
             death_screen.render(&mut canvas)?;
         }
 
-        // Render exit menu if active (can be shown over death screen)
         if game_state == GameState::ExitMenu {
             save_exit_menu.render(&mut canvas)?;
         }
 
-        // Render debug menu if active
         if let DebugMenuState::Open { selected_index } = debug_menu_state {
             render_debug_menu(&mut canvas, &player, &debug_config, selected_index)?;
         }
 
         canvas.present();
 
-        // Cap framerate to ~60 FPS
         std::thread::sleep(std::time::Duration::new(0, 1_000_000_000u32 / 60));
     }
 

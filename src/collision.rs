@@ -37,6 +37,8 @@ pub enum CollisionLayer {
     Projectile,
     /// Static world objects (rocks, trees, buildings)
     Static,
+    /// Dropped items (can be picked up by player)
+    Item,
 }
 
 /// Trait for entities that participate in collision detection.

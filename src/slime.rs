@@ -32,6 +32,7 @@ pub struct Slime<'a> {
     // Health system
     pub health: i32,
     pub is_alive: bool,
+    pub has_dropped_loot: bool,
 
     // Collision hitbox configuration
     pub hitbox_offset_x: i32,
@@ -56,6 +57,7 @@ impl<'a> Slime<'a> {
             jump_duration: 0.5, // Jump lasts 0.5 seconds total (2x faster)
             health: 8, // Slimes have 8 HP (takes 3 hits of 3 damage to kill)
             is_alive: true,
+            has_dropped_loot: false,
 
             // Default hitbox for slime (smaller, rounder character)
             // Tuned values: width=16, height=12 to match actual sprite artwork
@@ -290,6 +292,7 @@ impl Saveable for Slime<'_> {
             base_y: i32,
             health: i32,
             is_alive: bool,
+            has_dropped_loot: bool,
             hitbox_offset_x: i32,
             hitbox_offset_y: i32,
             hitbox_width: u32,
@@ -302,6 +305,7 @@ impl Saveable for Slime<'_> {
             base_y: self.base_y,
             health: self.health,
             is_alive: self.is_alive,
+            has_dropped_loot: self.has_dropped_loot,
             hitbox_offset_x: self.hitbox_offset_x,
             hitbox_offset_y: self.hitbox_offset_y,
             hitbox_width: self.hitbox_width,
@@ -322,6 +326,8 @@ impl Saveable for Slime<'_> {
             base_y: i32,
             health: i32,
             is_alive: bool,
+            #[serde(default)]
+            has_dropped_loot: bool,
             hitbox_offset_x: i32,
             hitbox_offset_y: i32,
             hitbox_width: u32,
@@ -349,6 +355,7 @@ impl Saveable for Slime<'_> {
         slime.base_y = slime_data.base_y;
         slime.health = slime_data.health;
         slime.is_alive = slime_data.is_alive;
+        slime.has_dropped_loot = slime_data.has_dropped_loot;
         slime.hitbox_offset_x = slime_data.hitbox_offset_x;
         slime.hitbox_offset_y = slime_data.hitbox_offset_y;
         slime.hitbox_width = slime_data.hitbox_width;

@@ -177,7 +177,7 @@ impl DamageResult {
 ///
 /// Using an enum ensures we can't accidentally mix up different stat types
 /// when applying modifiers
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[allow(dead_code)] // Reserved for future stat modifier system
 pub enum StatType {
     /// Movement speed in pixels per frame
@@ -198,7 +198,7 @@ pub enum StatType {
 /// 1. Override - replaces the value completely
 /// 2. Flat - adds/subtracts a fixed amount
 /// 3. Percentage - multiplies by a factor (0.5 = +50%)
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[allow(dead_code)] // Reserved for future stat modifier system
 pub enum StatModifier {
     /// Completely replace the stat value
@@ -212,7 +212,7 @@ pub enum StatModifier {
 /// A stat modification effect
 ///
 /// Represents a buff, debuff, or permanent stat change
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[allow(dead_code)] // Reserved for future stat modifier system
 pub struct ModifierEffect {
     /// Which stat this modifies
@@ -220,9 +220,24 @@ pub struct ModifierEffect {
     /// The type and value of modification
     pub modifier: StatModifier,
     /// How long the effect lasts (None = permanent)
+    /// Note: Duration is not serializable, so we skip it
+    #[serde(skip)]
     pub duration: Option<Duration>,
     /// What applied this effect (for debugging/UI)
     pub source: String,
+}
+
+impl ModifierEffect {
+    /// Creates a new permanent modifier effect
+    #[allow(dead_code)]
+    pub fn new(stat_type: StatType, _value: f32, modifier_type: StatModifier) -> Self {
+        ModifierEffect {
+            stat_type,
+            modifier: modifier_type,
+            duration: None,
+            source: String::new(),
+        }
+    }
 }
 
 /// Container for all base stats
