@@ -725,12 +725,23 @@ fn main() -> Result<(), String> {
     let mut mouse_x = 0;
     let mut mouse_y = 0;
 
-    'running: loop {
-        let keyboard_state = event_pump.keyboard_state();
-        let shift_held = keyboard_state.is_scancode_pressed(sdl2::keyboard::Scancode::LShift) ||
-                         keyboard_state.is_scancode_pressed(sdl2::keyboard::Scancode::RShift);
-        for event in event_pump.poll_iter() {
-            match event {
+                            'running: loop {
+
+                                let is_ui_active = inventory_ui.is_open ||
+
+                                                   matches!(debug_menu_state, DebugMenuState::Open { .. }) ||
+
+                                                   game_state == GameState::ExitMenu ||
+
+                                                   game_state == GameState::Dead;
+
+                    
+
+                                            for event in event_pump.poll_iter() {
+
+                    
+
+                                                match event {
                 Event::Quit { .. } => break 'running,
                 Event::KeyDown {
                     keycode: Some(Keycode::Escape),
@@ -934,7 +945,7 @@ fn main() -> Result<(), String> {
                 Event::KeyDown {
                     keycode: Some(Keycode::M),
                     ..
-                } => {
+                } if !is_ui_active => {
                     if let Some(attack_event) = player.start_attack() {
                         active_attack = Some(attack_event.clone());
 
@@ -973,14 +984,14 @@ fn main() -> Result<(), String> {
                 Event::KeyDown {
                     keycode: Some(Keycode::B),
                     ..
-                } => {
+                } if !is_ui_active => {
                     show_collision_boxes = !show_collision_boxes;
                     println!("Collision boxes: {}", if show_collision_boxes { "ON" } else { "OFF" });
                 }
                 Event::KeyDown {
                     keycode: Some(Keycode::G),
                     ..
-                } => {
+                } if !is_ui_active => {
                     show_tile_grid = !show_tile_grid;
                     println!("Tile grid debug: {}", if show_tile_grid { "ON" } else { "OFF" });
                 }
@@ -1004,27 +1015,44 @@ fn main() -> Result<(), String> {
                 Event::KeyDown {
                     keycode: Some(Keycode::Num1),
                     ..
-                } => {
+                } if !is_ui_active => {
                     selected_tile = TileId::Grass;
                 }
                 Event::KeyDown {
                     keycode: Some(Keycode::Num2),
                     ..
-                } => {
+                } if !is_ui_active => {
                     selected_tile = TileId::Dirt;
                 }
-                Event::MouseButtonDown { mouse_btn: sdl2::mouse::MouseButton::Left, x, y, .. } => {
+                Event::MouseButtonDown { mouse_btn, x, y, .. } => {
                     if game_state == GameState::Playing && inventory_ui.is_open {
                         let (screen_width, screen_height) = canvas.logical_size();
-                        inventory_ui.handle_mouse_click(x, y, screen_width, screen_height, &mut player_inventory, shift_held)?;
+                        // TODO: Add shift-click support for inventory. Currently can't check keyboard_state
+                        // during event loop due to borrowing constraints. Need to refactor event handling.
+                        let shift_held = false;
+                        inventory_ui.handle_mouse_click(x, y, screen_width, screen_height, &mut player_inventory, shift_held, mouse_btn)?;
                     }
-                    is_painting = true;
-                    let tile_x = x / 32;
-                    let tile_y = y / 32;
 
-                    if world_grid.set_tile(tile_x, tile_y, selected_tile) {
-                        render_grid.update_tile_and_neighbors(&world_grid, tile_x, tile_y);
-                        last_painted_tile = Some((tile_x, tile_y));
+                    if !is_ui_active {
+                        if mouse_btn == sdl2::mouse::MouseButton::Right {
+                            let slime_animation_controller = slime_config.create_controller(
+                                &slime_texture,
+                                &["slime_idle", "jump", "slime_damage", "slime_death"],
+                            )?;
+                            let center_offset = (32 * SPRITE_SCALE / 2) as i32;
+                            let mut new_slime = Slime::new(x - center_offset, y - center_offset, slime_animation_controller);
+                            new_slime.health = debug_config.slime_base_health;
+                            slimes.push(new_slime);
+                        }
+
+                        is_painting = true;
+                        let tile_x = x / 32;
+                        let tile_y = y / 32;
+
+                        if world_grid.set_tile(tile_x, tile_y, selected_tile) {
+                            render_grid.update_tile_and_neighbors(&world_grid, tile_x, tile_y);
+                            last_painted_tile = Some((tile_x, tile_y));
+                        }
                     }
                 }
                 Event::MouseButtonUp { mouse_btn: sdl2::mouse::MouseButton::Left, x, y, .. } => {
@@ -1062,7 +1090,7 @@ fn main() -> Result<(), String> {
                 Event::MouseMotion { x, y, .. } => {
                     mouse_x = x;
                     mouse_y = y;
-                    if is_painting {
+                    if is_painting && !is_ui_active {
                         let tile_x = x / 32;
                         let tile_y = y / 32;
 
@@ -1074,29 +1102,21 @@ fn main() -> Result<(), String> {
                         }
                     }
                 }
-                Event::MouseButtonDown { mouse_btn: sdl2::mouse::MouseButton::Right, x, y, .. } => {
-                    let slime_animation_controller = slime_config.create_controller(
-                        &slime_texture,
-                        &["slime_idle", "jump", "slime_damage", "slime_death"],
-                    )?;
-                    let center_offset = (32 * SPRITE_SCALE / 2) as i32;
-                    let mut new_slime = Slime::new(x - center_offset, y - center_offset, slime_animation_controller);
-                    new_slime.health = debug_config.slime_base_health;
-                    slimes.push(new_slime);
-                }
+
                 _ => {} // Ignore other events
             }
         }
 
-        if game_state == GameState::Playing {
+        let keyboard_state_for_player_update = event_pump.keyboard_state();
+
+        if game_state == GameState::Playing && !is_ui_active {
             if player.state.is_dead() {
                 game_state = GameState::Dead;
                 death_screen.trigger();
                 println!("Player died!");
             }
 
-            let keyboard_state = event_pump.keyboard_state();
-            player.update(&keyboard_state);
+            player.update(&keyboard_state_for_player_update);
 
             if let Some(ref attack) = active_attack {
                 let attack_hitbox = attack.get_hitbox();

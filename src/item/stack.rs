@@ -120,4 +120,18 @@ impl ItemStack {
     pub fn is_empty(&self) -> bool {
         self.quantity == 0
     }
+
+    /// Splits this stack in half, returning a new stack with half the quantity.
+    /// The original stack retains the other half (and any remainder).
+    /// Returns None if the stack has 1 or fewer items.
+    pub fn split_half(&mut self) -> Option<ItemStack> {
+        if self.quantity <= 1 {
+            return None; // Cannot split a stack of 1 or less
+        }
+
+        let new_stack_quantity = self.quantity / 2;
+        self.quantity -= new_stack_quantity;
+
+        Some(ItemStack::new(self.item_id.clone(), new_stack_quantity))
+    }
 }

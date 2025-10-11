@@ -241,6 +241,7 @@ impl<'a> InventoryUI<'a> {
         screen_height: u32,
         player_inventory: &mut PlayerInventory,
         shift_held: bool,
+        mouse_button: sdl2::mouse::MouseButton,
     ) -> Result<(), String> {
         if !self.is_open {
             return Ok(()); // Only handle clicks if inventory is open
@@ -250,50 +251,53 @@ impl<'a> InventoryUI<'a> {
 
         match clicked_slot_index {
             Some(index) => {
-                if shift_held {
-                    // Shift-click: transfer item
-                    // For now, we only have player inventory.
-                    // In the future, this will transfer to/from an open container.
-                    // For now, let's just move between hotbar and main inventory.
-                    // If clicked on hotbar, move to main inventory.
-                    // If clicked on main inventory, move to hotbar.
-                    if index < HOTBAR_SLOTS { // Clicked on hotbar
-                        // Try to move to main inventory (slots 9-26)
-                        let item_stack_option = player_inventory.inventory.slots[index].take();
-                        if let Some(item_stack) = item_stack_option {
-                            let overflow = player_inventory.inventory.add_item(&item_stack.item_id, item_stack.quantity, self.item_registry)?;
-                            if overflow > 0 {
-                                // Put overflow back
-                                player_inventory.inventory.slots[index] = Some(ItemStack::new(&item_stack.item_id, overflow));
+                match mouse_button {
+                    sdl2::mouse::MouseButton::Left => {
+                        if shift_held {
+                            // Shift-left-click: transfer item
+                            if index < HOTBAR_SLOTS { // Clicked on hotbar
+                                let item_stack_option = player_inventory.inventory.slots[index].take();
+                                if let Some(item_stack) = item_stack_option {
+                                    let overflow = player_inventory.inventory.add_item(&item_stack.item_id, item_stack.quantity, self.item_registry)?;
+                                    if overflow > 0 {
+                                        player_inventory.inventory.slots[index] = Some(ItemStack::new(&item_stack.item_id, overflow));
+                                    }
+                                }
+                            } else { // Clicked on main inventory
+                                let item_stack_option = player_inventory.inventory.slots[index].take();
+                                if let Some(item_stack) = item_stack_option {
+                                    let overflow = player_inventory.inventory.add_item(&item_stack.item_id, item_stack.quantity, self.item_registry)?;
+                                    if overflow > 0 {
+                                        player_inventory.inventory.slots[index] = Some(ItemStack::new(&item_stack.item_id, overflow));
+                                    }
+                                }
+                            }
+                        } else {
+                            // Normal left-click: pick up/place/swap
+                            if let Some(held_stack) = self.held_item.take() {
+                                let current_slot_item = player_inventory.inventory.slots[index].take();
+                                player_inventory.inventory.slots[index] = Some(held_stack); // Place held item
+                                self.held_item = current_slot_item; // Pick up whatever was in the slot
+                            } else {
+                                self.held_item = player_inventory.inventory.slots[index].take();
                             }
                         }
-                    } else { // Clicked on main inventory
-                        // Try to move to hotbar (slots 0-8)
-                        let item_stack_option = player_inventory.inventory.slots[index].take();
-                        if let Some(item_stack) = item_stack_option {
-                            let overflow = player_inventory.inventory.add_item(&item_stack.item_id, item_stack.quantity, self.item_registry)?;
-                            if overflow > 0 {
-                                // Put overflow back
-                                player_inventory.inventory.slots[index] = Some(ItemStack::new(&item_stack.item_id, overflow));
+                    },
+                    sdl2::mouse::MouseButton::Right => {
+                        // Right-click: split stack
+                        if self.held_item.is_none() {
+                            if let Some(slot_stack) = &mut player_inventory.inventory.slots[index] {
+                                if slot_stack.quantity > 1 {
+                                    self.held_item = slot_stack.split_half();
+                                }
                             }
                         }
-                    }
-                } else {
-                    // Normal click: pick up/place/swap
-                    if let Some(held_stack) = self.held_item.take() {
-                        // There is an item held, try to place it
-                        let current_slot_item = player_inventory.inventory.slots[index].take();
-                        player_inventory.inventory.slots[index] = Some(held_stack); // Place held item
-                        self.held_item = current_slot_item; // Pick up whatever was in the slot
-                    } else {
-                        // No item held, try to pick up from slot
-                        self.held_item = player_inventory.inventory.slots[index].take();
-                    }
+                    },
+                    _ => { /* Ignore other mouse buttons */ }
                 }
             }
             None => {
                 // Clicked outside any slot
-                // For now, do nothing. Phase 3 will handle dropping items.
             }
         }
 
