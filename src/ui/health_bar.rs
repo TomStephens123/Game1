@@ -81,7 +81,7 @@ impl Default for HealthBarStyle {
         HealthBarStyle {
             width: 32,
             height: 6,     // Increased from 4 to 6 (1.5x taller)
-            offset_y: 4, // Closer to entity (was -8, now -10 for taller bar)
+            offset_y: 4,   // Positioned below entity top (was -8 above, now 4 below)
             background_color: Color::RGB(50, 50, 50), // Dark gray
             health_color: Color::RGB(0, 200, 0),      // Green
             low_health_color: Color::RGB(200, 0, 0),  // Red
@@ -270,8 +270,8 @@ mod tests {
     fn test_default_health_bar_style() {
         let style = HealthBarStyle::default();
         assert_eq!(style.width, 32);
-        assert_eq!(style.height, 4);
-        assert_eq!(style.offset_y, -8);
+        assert_eq!(style.height, 6);  // Updated to 6 (was 4)
+        assert_eq!(style.offset_y, 4); // Updated to 4 (was -8)
         assert!(!style.show_when_full);
     }
 

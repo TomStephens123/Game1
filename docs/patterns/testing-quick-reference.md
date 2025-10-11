@@ -61,31 +61,14 @@ mod tests {
 - **ui::floating_text** (2 tests) - Floating text rendering
 - **ui::health_bar** (3 tests) - Health bar UI
 
-### Known Failing Tests (as of 2025-10-11)
+### Test Status
 
-1. **collision::tests::test_calculate_overlap_horizontal**
-   - Issue: Sign error in overlap calculation (expected 32, got -32)
-   - Location: src/collision.rs:387
+✅ **All tests passing** (as of 2025-10-11)
 
-2. **collision::tests::test_calculate_overlap_vertical**
-   - Issue: Sign error in overlap calculation (expected 32, got -32)
-   - Location: src/collision.rs:399
-
-3. **stats::tests::test_stat_modifiers_flat**
-   - Issue: Flat modifiers not applying correctly (expected 15.0, got 8.0)
-   - Location: src/stats.rs:420
-
-4. **stats::tests::test_stat_modifiers_percentage**
-   - Issue: Percentage modifiers not applying correctly (expected 15.0, got 4.5)
-   - Location: src/stats.rs:434
-
-5. **stats::tests::test_stat_modifiers_stacking**
-   - Issue: Multiple modifiers not stacking correctly (expected 22.5, got 12.0)
-   - Location: src/stats.rs:457
-
-6. **ui::health_bar::tests::test_default_health_bar_style**
-   - Issue: Border width mismatch (expected 4, got 6)
-   - Location: src/ui/health_bar.rs:273
+**Recent Fixes**:
+- Fixed collision overlap calculation for aligned rectangles (changed `<` to `<=`)
+- Updated stats tests to reflect current base attack_damage (3.0 instead of outdated 10.0)
+- Updated health bar tests to reflect current default style (height: 6, offset_y: 4)
 
 ## Common Test Patterns
 

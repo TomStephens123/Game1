@@ -164,8 +164,8 @@ pub fn calculate_overlap(a: &Rect, b: &Rect) -> (i32, i32) {
     let a_bottom = a.y() + a.height() as i32;
     let b_bottom = b.y() + b.height() as i32;
 
-    let overlap_y = if a.y() < b.y() {
-        // a is above, overlap is positive (push a up, b down)
+    let overlap_y = if a.y() <= b.y() {
+        // a is above or aligned, overlap is positive (push a up, b down)
         a_bottom - b.y()
     } else {
         // a is below, overlap is negative (push a down, b up)

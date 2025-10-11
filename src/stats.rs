@@ -308,9 +308,9 @@ impl Stats {
     ///     },
     /// ];
     ///
-    /// // Base (10) + Flat (5) = 15, then * 1.5 = 22.5
+    /// // Base (3) + Flat (5) = 8, then * 1.5 = 12.0
     /// let effective = stats.effective_stat(StatType::AttackDamage, &modifiers);
-    /// assert_eq!(effective, 22.5);
+    /// assert_eq!(effective, 12.0);
     /// ```
     #[allow(dead_code)] // Reserved for future stat modifier system
     pub fn effective_stat(&self, stat_type: StatType, modifiers: &[ModifierEffect]) -> f32 {
@@ -417,7 +417,7 @@ mod tests {
         }];
 
         let effective = stats.effective_stat(StatType::AttackDamage, &modifiers);
-        assert_eq!(effective, 15.0); // Base 10 + 5
+        assert_eq!(effective, 8.0); // Base 3 + 5
     }
 
     #[test]
@@ -431,7 +431,7 @@ mod tests {
         }];
 
         let effective = stats.effective_stat(StatType::AttackDamage, &modifiers);
-        assert_eq!(effective, 15.0); // Base 10 * 1.5
+        assert_eq!(effective, 4.5); // Base 3 * 1.5
     }
 
     #[test]
@@ -452,9 +452,9 @@ mod tests {
             },
         ];
 
-        // (10 + 5) * 1.5 = 22.5
+        // (3 + 5) * 1.5 = 12.0
         let effective = stats.effective_stat(StatType::AttackDamage, &modifiers);
-        assert_eq!(effective, 22.5);
+        assert_eq!(effective, 12.0);
     }
 
     #[test]
