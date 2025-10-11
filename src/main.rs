@@ -1007,6 +1007,61 @@ fn main() -> Result<(), String> {
                 } => {
                     inventory_ui.toggle();
                 }
+                // Number keys (1-9) to select hotbar slots
+                Event::KeyDown {
+                    keycode: Some(Keycode::Num1),
+                    ..
+                } if !is_ui_active => {
+                    player_inventory.set_hotbar_slot(0);
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::Num2),
+                    ..
+                } if !is_ui_active => {
+                    player_inventory.set_hotbar_slot(1);
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::Num3),
+                    ..
+                } if !is_ui_active => {
+                    player_inventory.set_hotbar_slot(2);
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::Num4),
+                    ..
+                } if !is_ui_active => {
+                    player_inventory.set_hotbar_slot(3);
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::Num5),
+                    ..
+                } if !is_ui_active => {
+                    player_inventory.set_hotbar_slot(4);
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::Num6),
+                    ..
+                } if !is_ui_active => {
+                    player_inventory.set_hotbar_slot(5);
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::Num7),
+                    ..
+                } if !is_ui_active => {
+                    player_inventory.set_hotbar_slot(6);
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::Num8),
+                    ..
+                } if !is_ui_active => {
+                    player_inventory.set_hotbar_slot(7);
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::Num9),
+                    ..
+                } if !is_ui_active => {
+                    player_inventory.set_hotbar_slot(8);
+                }
                 Event::KeyDown {
                     keycode: Some(Keycode::P),
                     ..
