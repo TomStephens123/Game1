@@ -1085,7 +1085,8 @@ fn main() -> Result<(), String> {
                     }
                 }
                 Event::MouseButtonDown { mouse_btn, x, y, .. } => {
-                    if game_state == GameState::Playing && inventory_ui.is_open {
+                    // Handle inventory/hotbar clicks (hotbar works even when inventory is closed)
+                    if game_state == GameState::Playing {
                         let (screen_width, screen_height) = canvas.logical_size();
                         // TODO: Add shift-click support for inventory. Currently can't check keyboard_state
                         // during event loop due to borrowing constraints. Need to refactor event handling.
@@ -1130,10 +1131,10 @@ fn main() -> Result<(), String> {
                     is_tilling = false;
                     last_tilled_tile = None;
 
-                    // If an item is held and mouse is released outside inventory window, drop it
+                    // If an item is held and mouse is released outside all inventory UI (hotbar + window), drop it
                     if game_state == GameState::Playing && inventory_ui.held_item.is_some() {
                         let (screen_width, screen_height) = canvas.logical_size();
-                        if !inventory_ui.is_mouse_over_inventory_window(x, y, screen_width, screen_height) {
+                        if !inventory_ui.is_mouse_over_any_inventory(x, y, screen_width, screen_height) {
                             if let Some(item_stack) = inventory_ui.held_item.take() {
                                 // Spawn dropped item at player's position
                                 let mut item_animation_controller = animation::AnimationController::new();

@@ -152,8 +152,8 @@ pub fn calculate_overlap(a: &Rect, b: &Rect) -> (i32, i32) {
     let a_right = a.x() + a.width() as i32;
     let b_right = b.x() + b.width() as i32;
 
-    let overlap_x = if a.x() < b.x() {
-        // a is to the left, overlap is positive (push a left, b right)
+    let overlap_x = if a.x() <= b.x() {
+        // a is to the left or aligned, overlap is positive (push a left, b right)
         a_right - b.x()
     } else {
         // a is to the right, overlap is negative (push a right, b left)

@@ -243,10 +243,7 @@ impl<'a> InventoryUI<'a> {
         shift_held: bool,
         mouse_button: sdl2::mouse::MouseButton,
     ) -> Result<(), String> {
-        if !self.is_open {
-            return Ok(()); // Only handle clicks if inventory is open
-        }
-
+        // Allow hotbar clicks always, inventory clicks only when open
         let clicked_slot_index = self.get_slot_at_mouse_pos(mouse_x, mouse_y, screen_width, screen_height);
 
         match clicked_slot_index {
@@ -273,12 +270,43 @@ impl<'a> InventoryUI<'a> {
                                 }
                             }
                         } else {
-                            // Normal left-click: pick up/place/swap
-                            if let Some(held_stack) = self.held_item.take() {
-                                let current_slot_item = player_inventory.inventory.slots[index].take();
-                                player_inventory.inventory.slots[index] = Some(held_stack); // Place held item
-                                self.held_item = current_slot_item; // Pick up whatever was in the slot
+                            // Normal left-click: pick up/place/combine/swap
+                            if let Some(mut held_stack) = self.held_item.take() {
+                                // Player is holding an item, trying to place it
+                                if let Some(existing_stack) = &mut player_inventory.inventory.slots[index] {
+                                    // Slot is occupied
+                                    if held_stack.item_id == existing_stack.item_id {
+                                        // Same item type - try to combine stacks!
+                                        if let Some(item_def) = self.item_registry.get(&held_stack.item_id) {
+                                            let max_stack = item_def.max_stack_size;
+
+                                            // Try to add held items to existing stack
+                                            let overflow = existing_stack.add(held_stack.quantity, max_stack);
+
+                                            if overflow > 0 {
+                                                // Couldn't fit all items, keep remainder in hand
+                                                held_stack.quantity = overflow;
+                                                self.held_item = Some(held_stack);
+                                            }
+                                            // else: All items combined successfully, hand is now empty
+                                        } else {
+                                            // Item not in registry (shouldn't happen), just swap
+                                            let temp = player_inventory.inventory.slots[index].take();
+                                            player_inventory.inventory.slots[index] = Some(held_stack);
+                                            self.held_item = temp;
+                                        }
+                                    } else {
+                                        // Different item types - swap them
+                                        let temp = player_inventory.inventory.slots[index].take();
+                                        player_inventory.inventory.slots[index] = Some(held_stack);
+                                        self.held_item = temp;
+                                    }
+                                } else {
+                                    // Slot is empty - just place the item
+                                    player_inventory.inventory.slots[index] = Some(held_stack);
+                                }
                             } else {
+                                // No held item - pick up from slot
                                 self.held_item = player_inventory.inventory.slots[index].take();
                             }
                         }
@@ -327,6 +355,25 @@ impl<'a> InventoryUI<'a> {
         }
         let inv_window_rect = self.inventory_window_rect(screen_width, screen_height);
         inv_window_rect.contains_point(sdl2::rect::Point::new(mouse_x, mouse_y))
+    }
+
+    /// Checks if mouse is over any inventory UI (hotbar or inventory window)
+    pub fn is_mouse_over_any_inventory(&self, mouse_x: i32, mouse_y: i32, screen_width: u32, screen_height: u32) -> bool {
+        // Check hotbar (always visible)
+        let hotbar = self.hotbar_rect(screen_width, screen_height);
+        if hotbar.contains_point(sdl2::rect::Point::new(mouse_x, mouse_y)) {
+            return true;
+        }
+
+        // Check inventory window (only if open)
+        if self.is_open {
+            let inv_window_rect = self.inventory_window_rect(screen_width, screen_height);
+            if inv_window_rect.contains_point(sdl2::rect::Point::new(mouse_x, mouse_y)) {
+                return true;
+            }
+        }
+
+        false
     }
 
     // Returns the Rect for a given slot index (0-8 for hotbar, 9-26 for main inventory)
