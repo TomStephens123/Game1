@@ -129,6 +129,817 @@ impl DebugConfig {
     }
 }
 
+/// Handle all input events from SDL2 event pump
+/// Returns true if the game should quit
+#[allow(clippy::too_many_arguments)]
+fn handle_events<'a>(
+    event_pump: &mut sdl2::EventPump,
+    game_state: &mut GameState,
+    debug_menu_state: &mut DebugMenuState,
+    player: &mut Player<'a>,
+    slimes: &mut Vec<Slime<'a>>,
+    entities: &mut Vec<TheEntity<'a>>,
+    world_grid: &mut WorldGrid,
+    render_grid: &mut RenderGrid,
+    player_inventory: &mut PlayerInventory,
+    dropped_items: &mut Vec<DroppedItem<'a>>,
+    active_attack: &mut Option<combat::AttackEvent>,
+    attack_effects: &mut Vec<AttackEffect<'a>>,
+    save_exit_menu: &mut SaveExitMenu,
+    death_screen: &mut DeathScreen,
+    inventory_ui: &mut InventoryUI,
+    save_manager: &mut SaveManager,
+    debug_config: &mut DebugConfig,
+    is_tilling: &mut bool,
+    last_tilled_tile: &mut Option<(i32, i32)>,
+    show_collision_boxes: &mut bool,
+    show_tile_grid: &mut bool,
+    mouse_x: &mut i32,
+    mouse_y: &mut i32,
+    player_config: &AnimationConfig,
+    slime_config: &AnimationConfig,
+    punch_config: &AnimationConfig,
+    character_texture: &'a sdl2::render::Texture<'a>,
+    slime_texture: &'a sdl2::render::Texture<'a>,
+    entity_texture: &'a sdl2::render::Texture<'a>,
+    punch_texture: &'a sdl2::render::Texture<'a>,
+    item_textures: &'a HashMap<String, sdl2::render::Texture<'a>>,
+    item_registry: &ItemRegistry,
+    canvas: &mut sdl2::render::Canvas<sdl2::video::Window>,
+) -> Result<bool, String> {
+    let is_ui_active = inventory_ui.is_open ||
+                       matches!(*debug_menu_state, DebugMenuState::Open { .. }) ||
+                       *game_state == GameState::ExitMenu ||
+                       *game_state == GameState::Dead;
+
+    for event in event_pump.poll_iter() {
+        match event {
+            Event::Quit { .. } => return Ok(true),
+            Event::KeyDown {
+                keycode: Some(Keycode::Escape),
+                ..
+            } => {
+                match *game_state {
+                    GameState::Playing => {
+                        // Close other UIs first before opening save/exit menu
+                        if inventory_ui.is_open {
+                            inventory_ui.is_open = false;
+                        } else if matches!(*debug_menu_state, DebugMenuState::Open { .. }) {
+                            *debug_menu_state = DebugMenuState::Closed;
+                        } else {
+                            *game_state = GameState::ExitMenu;
+                        }
+                    }
+                    GameState::ExitMenu => {
+                        *game_state = GameState::Playing;
+                    }
+                    GameState::Dead => {
+                        *game_state = GameState::ExitMenu;
+                        death_screen.reset();
+                    }
+                }
+            }
+            Event::KeyDown {
+                keycode: Some(Keycode::Up),
+                ..
+            } if *game_state == GameState::ExitMenu => {
+                save_exit_menu.navigate_up();
+            }
+            Event::KeyDown {
+                keycode: Some(Keycode::Down),
+                ..
+            } if *game_state == GameState::ExitMenu => {
+                save_exit_menu.navigate_down();
+            }
+            Event::KeyDown {
+                keycode: Some(Keycode::Return | Keycode::Space),
+                ..
+            } if *game_state == GameState::ExitMenu => {
+                match save_exit_menu.selected_option() {
+                    SaveExitOption::SaveAndExit => {
+                        if let Err(e) = save_game(save_manager, player, slimes, world_grid, entities, player_inventory, dropped_items) {
+                            eprintln!("Failed to save: {}", e);
+                        }
+                        return Ok(true);
+                    }
+                    SaveExitOption::Cancel => {
+                        *game_state = GameState::Playing;
+                    }
+                }
+            }
+            Event::KeyDown {
+                keycode: Some(Keycode::F5),
+                ..
+            } if *game_state == GameState::Playing => {
+                if let Err(e) = save_game(save_manager, player, slimes, world_grid, entities, player_inventory, dropped_items) {
+                    eprintln!("Failed to save: {}", e);
+                }
+            }
+            Event::KeyDown {
+                keycode: Some(Keycode::F9),
+                ..
+            } if *game_state == GameState::Playing => {
+                match load_game(save_manager, player_config, slime_config, character_texture, slime_texture, entity_texture, item_textures) {
+                    Ok((loaded_player, loaded_slimes, loaded_world, loaded_entities, loaded_inventory, loaded_items)) => {
+                        *player = loaded_player;
+                        *slimes = loaded_slimes;
+                        *world_grid = loaded_world;
+                        *render_grid = RenderGrid::new(world_grid);
+                        *entities = loaded_entities;
+                        *player_inventory = loaded_inventory;
+                        *dropped_items = loaded_items;
+                        attack_effects.clear();
+                        *active_attack = None;
+                        println!("✓ Game loaded successfully!");
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to load: {}", e);
+                    }
+                }
+            }
+            Event::KeyDown {
+                keycode: Some(Keycode::Return | Keycode::Space),
+                ..
+            } if matches!(*debug_menu_state, DebugMenuState::Open { .. }) => {
+                if let DebugMenuState::Open { selected_index } = *debug_menu_state {
+                    let items = DebugMenuItem::all();
+                    match items[selected_index] {
+                        DebugMenuItem::ClearInventory => {
+                            player_inventory.inventory.clear();
+                            println!("Player inventory cleared!");
+                        }
+                        _ => { /* Other debug menu items don't have an action on Enter/Space */ }
+                    }
+                }
+            }
+            Event::KeyDown {
+                keycode: Some(Keycode::F3),
+                ..
+            } if *game_state == GameState::Playing => {
+                *debug_menu_state = match *debug_menu_state {
+                    DebugMenuState::Closed => {
+                        println!("Debug menu: OPEN");
+                        DebugMenuState::Open { selected_index: 0 }
+                    }
+                    DebugMenuState::Open { .. } => {
+                        println!("Debug menu: CLOSED");
+                        DebugMenuState::Closed
+                    }
+                };
+            }
+            Event::KeyDown {
+                keycode: Some(Keycode::Up),
+                ..
+            } if matches!(*debug_menu_state, DebugMenuState::Open { .. }) => {
+                if let DebugMenuState::Open { selected_index } = *debug_menu_state {
+                    let items = DebugMenuItem::all();
+                    let new_index = if selected_index == 0 {
+                        items.len() - 1
+                    } else {
+                        selected_index - 1
+                    };
+                    *debug_menu_state = DebugMenuState::Open { selected_index: new_index };
+                }
+            }
+            Event::KeyDown {
+                keycode: Some(Keycode::Down),
+                ..
+            } if matches!(*debug_menu_state, DebugMenuState::Open { .. }) => {
+                if let DebugMenuState::Open { selected_index } = *debug_menu_state {
+                    let items = DebugMenuItem::all();
+                    let new_index = (selected_index + 1) % items.len();
+                    *debug_menu_state = DebugMenuState::Open { selected_index: new_index };
+                }
+            }
+            Event::KeyDown {
+                keycode: Some(Keycode::Left),
+                keymod,
+                ..
+            } if matches!(*debug_menu_state, DebugMenuState::Open { .. }) => {
+                if let DebugMenuState::Open { selected_index } = *debug_menu_state {
+                    let items = DebugMenuItem::all();
+                    let item = items[selected_index];
+                    let shift_held = keymod.intersects(sdl2::keyboard::Mod::LSHIFTMOD | sdl2::keyboard::Mod::RSHIFTMOD);
+                    let delta = if shift_held { -10.0 } else { -1.0 };
+
+                    match item {
+                        DebugMenuItem::PlayerMaxHealth => {
+                            let new_val = (player.stats.max_health + delta).max(1.0);
+                            player.stats.max_health = new_val;
+                            player.stats.health.set_max(new_val);
+                        }
+                        DebugMenuItem::PlayerAttackDamage => {
+                            player.stats.attack_damage = (player.stats.attack_damage + delta).max(0.0);
+                        }
+                        DebugMenuItem::PlayerAttackSpeed => {
+                            player.stats.attack_speed = (player.stats.attack_speed + delta).max(0.1);
+                        }
+                        DebugMenuItem::SlimeHealth => {
+                            debug_config.slime_base_health = (debug_config.slime_base_health as f32 + delta).max(1.0) as i32;
+                        }
+                        DebugMenuItem::SlimeContactDamage => {
+                            debug_config.slime_contact_damage = (debug_config.slime_contact_damage + delta).max(0.0);
+                        }
+                        DebugMenuItem::ClearInventory => {
+                            // This item doesn't change value with left/right, it's an action.
+                        }
+                    }
+                }
+            }
+            Event::KeyDown {
+                keycode: Some(Keycode::Right),
+                keymod,
+                ..
+            } if matches!(*debug_menu_state, DebugMenuState::Open { .. }) => {
+                if let DebugMenuState::Open { selected_index } = *debug_menu_state {
+                    let items = DebugMenuItem::all();
+                    let item = items[selected_index];
+                    let shift_held = keymod.intersects(sdl2::keyboard::Mod::LSHIFTMOD | sdl2::keyboard::Mod::RSHIFTMOD);
+                    let delta = if shift_held { 10.0 } else { 1.0 };
+
+                    match item {
+                        DebugMenuItem::PlayerMaxHealth => {
+                            let new_val = player.stats.max_health + delta;
+                            player.stats.max_health = new_val;
+                            player.stats.health.set_max(new_val);
+                        }
+                        DebugMenuItem::PlayerAttackDamage => {
+                            player.stats.attack_damage += delta;
+                        }
+                        DebugMenuItem::PlayerAttackSpeed => {
+                            player.stats.attack_speed += delta;
+                        }
+                        DebugMenuItem::SlimeHealth => {
+                            debug_config.slime_base_health = (debug_config.slime_base_health as f32 + delta) as i32;
+                        }
+                        DebugMenuItem::SlimeContactDamage => {
+                            debug_config.slime_contact_damage += delta;
+                        }
+                        DebugMenuItem::ClearInventory => {
+                            // This item doesn't change value with left/right, it's an action.
+                        }
+                    }
+                }
+            }
+            Event::KeyDown {
+                keycode: Some(Keycode::M),
+                ..
+            } if !is_ui_active => {
+                if let Some(attack_event) = player.start_attack() {
+                    *active_attack = Some(attack_event.clone());
+
+                    // Attack effect positioning
+                    // Player position is now anchor-based (bottom-center)
+                    // We want the effect centered on the player's body, then offset by direction
+
+                    // Calculate player's visual center from anchor
+                    let player_center_y = player.y - (player.height * SPRITE_SCALE) as i32 / 2;
+
+                    // Directional offset from player center
+                    // ADJUST THIS VALUE to change attack effect distance
+                    let offset = 20;
+                    let (offset_x, offset_y) = match player.direction {
+                        crate::animation::Direction::North => (0, -offset),
+                        crate::animation::Direction::NorthEast => (offset, -offset),
+                        crate::animation::Direction::East => (offset, 0),
+                        crate::animation::Direction::SouthEast => (offset, offset),
+                        crate::animation::Direction::South => (0, offset),
+                        crate::animation::Direction::SouthWest => (-offset, offset),
+                        crate::animation::Direction::West => (-offset, 0),
+                        crate::animation::Direction::NorthWest => (-offset, -offset),
+                    };
+
+                    // Calculate effect center position
+                    let effect_center_x = player.x + offset_x;
+                    let effect_center_y = player_center_y + offset_y;
+
+                    // Convert to top-left (AttackEffect uses top-left positioning)
+                    // Effect is 32x32 at 2x scale = 64x64
+                    let effect_size = 32 * SPRITE_SCALE as i32;
+                    let effect_x = effect_center_x - effect_size / 2;
+                    let effect_y = effect_center_y - effect_size / 2;
+
+                    match punch_config.create_controller(punch_texture, &["punch"]) {
+                        Ok(punch_animation_controller) => {
+                            attack_effects.push(AttackEffect::new(
+                                effect_x,
+                                effect_y,
+                                32,
+                                32,
+                                player.direction,
+                                punch_animation_controller,
+                            ));
+                        }
+                        Err(e) => {
+                            eprintln!("ERROR: Failed to create punch controller: {}", e);
+                        }
+                    }
+                }
+            }
+            Event::KeyDown {
+                keycode: Some(Keycode::B),
+                ..
+            } if !is_ui_active => {
+                *show_collision_boxes = !*show_collision_boxes;
+                println!("Collision boxes: {}", if *show_collision_boxes { "ON" } else { "OFF" });
+            }
+            Event::KeyDown {
+                keycode: Some(Keycode::G),
+                ..
+            } if !is_ui_active => {
+                *show_tile_grid = !*show_tile_grid;
+                println!("Tile grid debug: {}", if *show_tile_grid { "ON" } else { "OFF" });
+            }
+            Event::KeyDown {
+                keycode: Some(Keycode::I),
+                ..
+            } => {
+                inventory_ui.toggle();
+            }
+            // Number keys (1-9) to select hotbar slots
+            Event::KeyDown {
+                keycode: Some(Keycode::Num1),
+                ..
+            } if !is_ui_active => {
+                player_inventory.set_hotbar_slot(0);
+            }
+            Event::KeyDown {
+                keycode: Some(Keycode::Num2),
+                ..
+            } if !is_ui_active => {
+                player_inventory.set_hotbar_slot(1);
+            }
+            Event::KeyDown {
+                keycode: Some(Keycode::Num3),
+                ..
+            } if !is_ui_active => {
+                player_inventory.set_hotbar_slot(2);
+            }
+            Event::KeyDown {
+                keycode: Some(Keycode::Num4),
+                ..
+            } if !is_ui_active => {
+                player_inventory.set_hotbar_slot(3);
+            }
+            Event::KeyDown {
+                keycode: Some(Keycode::Num5),
+                ..
+            } if !is_ui_active => {
+                player_inventory.set_hotbar_slot(4);
+            }
+            Event::KeyDown {
+                keycode: Some(Keycode::Num6),
+                ..
+            } if !is_ui_active => {
+                player_inventory.set_hotbar_slot(5);
+            }
+            Event::KeyDown {
+                keycode: Some(Keycode::Num7),
+                ..
+            } if !is_ui_active => {
+                player_inventory.set_hotbar_slot(6);
+            }
+            Event::KeyDown {
+                keycode: Some(Keycode::Num8),
+                ..
+            } if !is_ui_active => {
+                player_inventory.set_hotbar_slot(7);
+            }
+            Event::KeyDown {
+                keycode: Some(Keycode::Num9),
+                ..
+            } if !is_ui_active => {
+                player_inventory.set_hotbar_slot(8);
+            }
+            Event::KeyDown {
+                keycode: Some(Keycode::P),
+                ..
+            } if inventory_ui.is_open => {
+                // Give a stack of 16 slime balls to the player
+                match player_inventory.quick_add("slime_ball", 16, item_registry) {
+                    Ok(0) => println!("Added 16 slime balls to inventory."),
+                    Ok(overflow) => println!("Inventory full. {} slime balls could not be added.", overflow),
+                    Err(e) => eprintln!("Error adding slime balls: {}", e),
+                }
+            }
+            Event::KeyDown {
+                keycode: Some(Keycode::H),
+                ..
+            } if inventory_ui.is_open => {
+                // Give a hoe to the player (debug command)
+                match player_inventory.quick_add("hoe", 1, item_registry) {
+                    Ok(0) => println!("Added hoe to inventory."),
+                    Ok(_overflow) => println!("Inventory full. Hoe could not be added."),
+                    Err(e) => eprintln!("Error adding hoe: {}", e),
+                }
+            }
+            Event::MouseButtonDown { mouse_btn, x, y, .. } => {
+                // Handle inventory/hotbar clicks (hotbar works even when inventory is closed)
+                if *game_state == GameState::Playing {
+                    let (screen_width, screen_height) = canvas.logical_size();
+                    // TODO: Add shift-click support for inventory. Currently can't check keyboard_state
+                    // during event loop due to borrowing constraints. Need to refactor event handling.
+                    let shift_held = false;
+                    inventory_ui.handle_mouse_click(x, y, screen_width, screen_height, player_inventory, shift_held, mouse_btn)?;
+                }
+
+                if !is_ui_active {
+                    if mouse_btn == sdl2::mouse::MouseButton::Right {
+                        let slime_animation_controller = slime_config.create_controller(
+                            slime_texture,
+                            &["slime_idle", "jump", "slime_damage", "slime_death"],
+                        )?;
+
+                        // Spawn slime so that click position = collision box center
+                        // This makes spawning intuitive and easier for procedural generation
+                        //
+                        // Slime uses anchor positioning internally (bottom-center of sprite)
+                        // but we want the click to target the collision box center (visible body)
+                        //
+                        // To calculate anchor from desired collision center:
+                        // anchor = click - collision_offset - (collision_size / 2)
+                        let temp_slime = Slime::new(0, 0, AnimationController::new());
+                        let anchor_x = x - (temp_slime.hitbox_offset_x * SPRITE_SCALE as i32) - (temp_slime.hitbox_width * SPRITE_SCALE / 2) as i32;
+                        let anchor_y = y - (temp_slime.hitbox_offset_y * SPRITE_SCALE as i32) - (temp_slime.hitbox_height * SPRITE_SCALE / 2) as i32;
+
+                        let mut new_slime = Slime::new(anchor_x, anchor_y, slime_animation_controller);
+                        new_slime.health = debug_config.slime_base_health;
+                        slimes.push(new_slime);
+                    }
+
+                    // Check if player has a hoe selected in hotbar
+                    if let Some(selected_item) = player_inventory.get_selected_hotbar() {
+                        if let Some(item_def) = item_registry.get(&selected_item.item_id) {
+                            if let ItemProperties::Tool { tool_type: ToolType::Hoe, .. } = item_def.properties {
+                                // Player has a hoe selected, allow tilling
+                                *is_tilling = true;
+                                let tile_x = x / 32;
+                                let tile_y = y / 32;
+
+                                // Only allow grass -> dirt conversion
+                                if world_grid.get_tile(tile_x, tile_y) == Some(TileId::Grass) {
+                                    if world_grid.set_tile(tile_x, tile_y, TileId::Dirt) {
+                                        render_grid.update_tile_and_neighbors(world_grid, tile_x, tile_y);
+                                        *last_tilled_tile = Some((tile_x, tile_y));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Event::MouseButtonUp { mouse_btn: sdl2::mouse::MouseButton::Left, x, y, .. } => {
+                *is_tilling = false;
+                *last_tilled_tile = None;
+
+                // If an item is held and mouse is released outside all inventory UI (hotbar + window), drop it
+                if *game_state == GameState::Playing && inventory_ui.held_item.is_some() {
+                    let (screen_width, screen_height) = canvas.logical_size();
+                    if !inventory_ui.is_mouse_over_any_inventory(x, y, screen_width, screen_height) {
+                        if let Some(item_stack) = inventory_ui.held_item.take() {
+                            // Spawn dropped item at player's position
+                            let mut item_animation_controller = animation::AnimationController::new();
+                            let item_frames = vec![
+                                sprite::Frame::new(0, 0, 32, 32, 300),
+                            ];
+                            let item_texture = item_textures.get(&item_stack.item_id).ok_or(format!("Missing texture for item {}", item_stack.item_id))?;
+                            let item_sprite_sheet = SpriteSheet::new(item_texture, item_frames);
+                            item_animation_controller.add_animation("item_idle".to_string(), item_sprite_sheet);
+                            item_animation_controller.set_state("item_idle".to_string());
+
+                            let dropped_item = DroppedItem::new(
+                                player.x,
+                                player.y,
+                                item_stack.item_id.clone(),
+                                item_stack.quantity,
+                                item_animation_controller,
+                            );
+                            dropped_items.push(dropped_item);
+                            println!("Dropped {} x{} at ({}, {})", item_stack.item_id, item_stack.quantity, player.x, player.y);
+                        }
+                    }
+                }
+            }
+            Event::MouseMotion { x, y, .. } => {
+                *mouse_x = x;
+                *mouse_y = y;
+                if *is_tilling && !is_ui_active {
+                    let tile_x = x / 32;
+                    let tile_y = y / 32;
+
+                    if *last_tilled_tile != Some((tile_x, tile_y)) {
+                        // Only allow grass -> dirt conversion
+                        if world_grid.get_tile(tile_x, tile_y) == Some(TileId::Grass) {
+                            if world_grid.set_tile(tile_x, tile_y, TileId::Dirt) {
+                                render_grid.update_tile_and_neighbors(world_grid, tile_x, tile_y);
+                                *last_tilled_tile = Some((tile_x, tile_y));
+                            }
+                        }
+                    }
+                }
+            }
+
+            _ => {} // Ignore other events
+        }
+    }
+
+    Ok(false) // Don't quit
+}
+
+/// Update game world state (entities, collisions, physics, loot)
+/// This is called once per frame when game_state == Playing
+#[allow(clippy::too_many_arguments)]
+fn update_world<'a>(
+    player: &mut Player<'a>,
+    slimes: &mut Vec<Slime<'a>>,
+    entities: &mut Vec<TheEntity<'a>>,
+    dropped_items: &mut Vec<DroppedItem<'a>>,
+    player_inventory: &mut PlayerInventory,
+    active_attack: &mut Option<combat::AttackEvent>,
+    attack_effects: &mut Vec<AttackEffect<'a>>,
+    floating_texts: &mut Vec<FloatingTextInstance>,
+    static_objects: &[StaticObject],
+    has_regen: &mut bool,
+    regen_timer: &mut Instant,
+    regen_interval: f32,
+    debug_config: &DebugConfig,
+    item_textures: &'a HashMap<String, sdl2::render::Texture<'a>>,
+    item_registry: &ItemRegistry,
+    keyboard_state: &sdl2::keyboard::KeyboardState,
+) -> Result<(), String> {
+    // Update player movement
+    player.update(keyboard_state);
+
+    // Handle active attack hitting enemies
+    if let Some(ref attack) = *active_attack {
+        let attack_hitbox = attack.get_hitbox();
+
+        // Check attack vs slimes
+        for slime in slimes.iter_mut() {
+            let slime_bounds = slime.get_bounds();
+            if collision::aabb_intersect(&attack_hitbox, &slime_bounds) {
+                slime.take_damage(attack.damage as i32);
+            }
+        }
+
+        // Check attack vs entities (pyramids)
+        for entity in entities.iter_mut() {
+            if let Some(state_before_hit) = entity.check_hit(&attack_hitbox) {
+                // Drop stone only if entity was not in Awake state
+                if state_before_hit != the_entity::EntityState::Awake {
+                    let drop_x = entity.x + (entity.width as i32) / 2;
+                    let drop_y = entity.y + (entity.height as i32) / 2;
+
+                    let mut item_animation_controller = animation::AnimationController::new();
+                    let item_frames = vec![sprite::Frame::new(0, 0, 32, 32, 300)];
+
+                    if let Some(item_texture) = item_textures.get("stone") {
+                        let item_sprite_sheet = sprite::SpriteSheet::new(item_texture, item_frames);
+                        item_animation_controller.add_animation("item_idle".to_string(), item_sprite_sheet);
+                        item_animation_controller.set_state("item_idle".to_string());
+
+                        let dropped_item = dropped_item::DroppedItem::new(
+                            drop_x,
+                            drop_y,
+                            "stone".to_string(),
+                            1,
+                            item_animation_controller,
+                        );
+                        dropped_items.push(dropped_item);
+                    }
+                }
+            }
+        }
+
+        *active_attack = None;
+    }
+
+    // Update slimes
+    for slime in slimes.iter_mut() {
+        slime.update();
+    }
+
+    // Update entities and floating texts
+    let delta_time = 1.0 / 60.0;
+    for entity in entities.iter_mut() {
+        entity.update(delta_time);
+    }
+
+    for text in floating_texts.iter_mut() {
+        text.lifetime += delta_time;
+        text.y -= 20.0 * delta_time;
+    }
+    floating_texts.retain(|text| text.lifetime < text.max_lifetime);
+
+    // Apply entity buffs to player
+    player.active_modifiers.clear();
+    *has_regen = false;
+    for entity in entities.iter() {
+        if entity.state == EntityState::Awake {
+            match entity.entity_type {
+                EntityType::Attack => {
+                    player.active_modifiers.push(ModifierEffect {
+                        stat_type: StatType::AttackDamage,
+                        modifier: StatModifier::Flat(1.0),
+                        duration: None,
+                        source: "Pyramid of Attack".to_string(),
+                    });
+                }
+                EntityType::Defense => {
+                    player.active_modifiers.push(ModifierEffect {
+                        stat_type: StatType::Defense,
+                        modifier: StatModifier::Flat(1.0),
+                        duration: None,
+                        source: "Pyramid of Defense".to_string(),
+                    });
+                }
+                EntityType::Speed => {
+                    player.active_modifiers.push(ModifierEffect {
+                        stat_type: StatType::MovementSpeed,
+                        modifier: StatModifier::Flat(1.0),
+                        duration: None,
+                        source: "Pyramid of Speed".to_string(),
+                    });
+                }
+                EntityType::Regeneration => {
+                    *has_regen = true;
+                }
+            }
+        }
+    }
+
+    // Handle regeneration
+    if *has_regen && regen_timer.elapsed().as_secs_f32() >= regen_interval {
+        if player.stats.health.current() < player.stats.max_health {
+            player.stats.health.heal(2.0);
+
+            floating_texts.push(FloatingTextInstance {
+                x: player.x as f32,
+                y: (player.y - (player.height * SPRITE_SCALE) as i32) as f32,
+                text: "+2".to_string(),
+                color: Color::RGB(0, 255, 0),
+                lifetime: 0.0,
+                max_lifetime: 1.5,
+            });
+
+            for entity in entities.iter() {
+                if entity.state == EntityState::Awake && entity.entity_type == EntityType::Regeneration {
+                    floating_texts.push(FloatingTextInstance {
+                        x: entity.x as f32 + 16.0,
+                        y: entity.y as f32,
+                        text: "+2".to_string(),
+                        color: Color::RGB(0, 255, 0),
+                        lifetime: 0.0,
+                        max_lifetime: 1.5,
+                    });
+                    break;
+                }
+            }
+        }
+        *regen_timer = Instant::now();
+    }
+
+    // Update attack effects
+    for effect in attack_effects.iter_mut() {
+        effect.update();
+    }
+    attack_effects.retain(|effect| !effect.is_finished());
+
+    // Handle player-slime collisions (push physics + contact damage)
+    let colliding_slime_indices = check_collisions_with_collection(player, slimes);
+
+    for slime_index in colliding_slime_indices {
+        let player_bounds = player.get_bounds();
+        let slime_bounds = slimes[slime_index].get_bounds();
+
+        let (overlap_x, overlap_y) = calculate_overlap(&player_bounds, &slime_bounds);
+
+        // Push-apart physics (30% player, 70% slime)
+        if overlap_x.abs() < overlap_y.abs() {
+            player.apply_push(-overlap_x * 3 / 10, 0);
+            slimes[slime_index].apply_push(overlap_x * 7 / 10, 0);
+        } else {
+            player.apply_push(0, -overlap_y * 3 / 10);
+            slimes[slime_index].apply_push(0, overlap_y * 7 / 10);
+        }
+
+        // Contact damage
+        if !player.is_attacking && !slimes[slime_index].is_invulnerable() {
+            let damage = DamageEvent::physical(debug_config.slime_contact_damage, DamageSource::Enemy);
+            let damage_result = player.take_damage(damage);
+            if damage_result.is_fatal {
+                // Drop all items from player inventory
+                for item_stack_option in player_inventory.inventory.slots.iter_mut() {
+                    if let Some(item_stack) = item_stack_option.take() {
+                        let mut item_animation_controller = animation::AnimationController::new();
+                        let item_frames = vec![sprite::Frame::new(0, 0, 32, 32, 300)];
+                        let item_texture = item_textures.get(&item_stack.item_id).ok_or(format!("Missing texture for item {}", item_stack.item_id))?;
+                        let item_sprite_sheet = SpriteSheet::new(item_texture, item_frames);
+                        item_animation_controller.add_animation("item_idle".to_string(), item_sprite_sheet);
+                        item_animation_controller.set_state("item_idle".to_string());
+
+                        let dropped_item = DroppedItem::new(
+                            player.x,
+                            player.y,
+                            item_stack.item_id.clone(),
+                            item_stack.quantity,
+                            item_animation_controller,
+                        );
+                        dropped_items.push(dropped_item);
+                    }
+                }
+                println!("Player died and dropped all items.");
+            }
+        }
+    }
+
+    // Handle slime loot drops
+    for slime in slimes.iter_mut() {
+        if slime.is_dying() && !slime.has_dropped_loot {
+            slime.has_dropped_loot = true;
+            let mut item_animation_controller = animation::AnimationController::new();
+            let item_frames = vec![sprite::Frame::new(0, 0, 32, 32, 300)];
+            let item_texture = item_textures.get("slime_ball").ok_or("Missing slime_ball texture in item_textures map")?;
+            let item_sprite_sheet = SpriteSheet::new(item_texture, item_frames);
+            item_animation_controller.add_animation("item_idle".to_string(), item_sprite_sheet);
+            item_animation_controller.set_state("item_idle".to_string());
+
+            let drop_x = slime.x + (slime.hitbox_offset_x * SPRITE_SCALE as i32) + (slime.hitbox_width * SPRITE_SCALE / 2) as i32;
+            let drop_y = slime.y + (slime.hitbox_offset_y * SPRITE_SCALE as i32) + (slime.hitbox_height * SPRITE_SCALE / 2) as i32;
+
+            let dropped_item = DroppedItem::new(
+                drop_x,
+                drop_y,
+                "slime_ball".to_string(),
+                1,
+                item_animation_controller,
+            );
+            dropped_items.push(dropped_item);
+        }
+    }
+
+    // Remove dead slimes
+    slimes.retain(|slime| slime.is_alive);
+
+    // Handle item pickup
+    let player_bounds = player.get_bounds();
+    dropped_items.retain(|item| {
+        if !item.can_pickup {
+            return true; // Keep items in cooldown
+        }
+
+        if player_bounds.has_intersection(item.get_bounds()) {
+            match player_inventory.quick_add(&item.item_id, item.quantity, item_registry) {
+                Ok(overflow) => {
+                    if overflow == 0 {
+                        println!("✓ Picked up {} x{}", item.item_id, item.quantity);
+                        false // Remove from world
+                    } else {
+                        println!("⚠ Inventory full! {} items couldn't fit", overflow);
+                        true // Keep in world
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to pickup item: {}", e);
+                    true // Keep in world on error
+                }
+            }
+        } else {
+            true // Keep if not colliding
+        }
+    });
+
+    // Update dropped items (for despawn timer)
+    dropped_items.retain_mut(|item| !item.update()); // Remove if despawned
+
+    // Handle player-static collisions (walls, entities)
+    let mut all_static_collidables: Vec<&dyn StaticCollidable> = Vec::new();
+    for obj in static_objects {
+        all_static_collidables.push(obj);
+    }
+    for entity in entities.iter() {
+        all_static_collidables.push(entity);
+    }
+
+    let static_collisions = check_static_collisions(player, &all_static_collidables);
+
+    for obj_index in static_collisions {
+        let player_bounds = player.get_bounds();
+        let obj_bounds = all_static_collidables[obj_index].get_bounds();
+
+        let (overlap_x, overlap_y) = calculate_overlap(&player_bounds, &obj_bounds);
+
+        // Push player out completely (100% push on player, 0% on static object)
+        if overlap_x.abs() < overlap_y.abs() {
+            player.apply_push(-overlap_x, 0);
+        } else {
+            player.apply_push(0, -overlap_y);
+        }
+    }
+
+    Ok(())
+}
+
 
 /// Generic texture loading helper
 ///
@@ -725,631 +1536,82 @@ fn main() -> Result<(), String> {
     let mut mouse_x = 0;
     let mut mouse_y = 0;
 
-                            'running: loop {
-
-                                let is_ui_active = inventory_ui.is_open ||
-
-                                                   matches!(debug_menu_state, DebugMenuState::Open { .. }) ||
-
-                                                   game_state == GameState::ExitMenu ||
-
-                                                   game_state == GameState::Dead;
-
-                    
-
-                                            for event in event_pump.poll_iter() {
-
-                    
-
-                                                match event {
-                Event::Quit { .. } => break 'running,
-                Event::KeyDown {
-                    keycode: Some(Keycode::Escape),
-                    ..
-                } => {
-                    match game_state {
-                        GameState::Playing => {
-                            // Close other UIs first before opening save/exit menu
-                            if inventory_ui.is_open {
-                                inventory_ui.is_open = false;
-                            } else if matches!(debug_menu_state, DebugMenuState::Open { .. }) {
-                                debug_menu_state = DebugMenuState::Closed;
-                            } else {
-                                game_state = GameState::ExitMenu;
-                            }
-                        }
-                        GameState::ExitMenu => {
-                            game_state = GameState::Playing;
-                        }
-                        GameState::Dead => {
-                            game_state = GameState::ExitMenu;
-                            death_screen.reset();
-                        }
-                    }
-                }
-                Event::KeyDown {
-                    keycode: Some(Keycode::Up),
-                    ..
-                } if game_state == GameState::ExitMenu => {
-                    save_exit_menu.navigate_up();
-                }
-                Event::KeyDown {
-                    keycode: Some(Keycode::Down),
-                    ..
-                } if game_state == GameState::ExitMenu => {
-                    save_exit_menu.navigate_down();
-                }
-                Event::KeyDown {
-                    keycode: Some(Keycode::Return | Keycode::Space),
-                    ..
-                } if game_state == GameState::ExitMenu => {
-                    match save_exit_menu.selected_option() {
-                        SaveExitOption::SaveAndExit => {
-                            if let Err(e) = save_game(&mut save_manager, &player, &slimes, &world_grid, &entities, &player_inventory, &dropped_items) {
-                                eprintln!("Failed to save: {}", e);
-                            }
-                            break 'running;
-                        }
-                        SaveExitOption::Cancel => {
-                            game_state = GameState::Playing;
-                        }
-                    }
-                }
-                Event::KeyDown {
-                    keycode: Some(Keycode::F5),
-                    ..
-                } if game_state == GameState::Playing => {
-                    if let Err(e) = save_game(&mut save_manager, &player, &slimes, &world_grid, &entities, &player_inventory, &dropped_items) {
-                        eprintln!("Failed to save: {}", e);
-                    }
-                }
-                Event::KeyDown {
-                    keycode: Some(Keycode::F9),
-                    ..
-                } if game_state == GameState::Playing => {
-                    match load_game(&save_manager, &player_config, &slime_config, &character_texture, &slime_texture, &entity_texture, &item_textures) {
-                        Ok((loaded_player, loaded_slimes, loaded_world, loaded_entities, loaded_inventory, loaded_items)) => {
-                            player = loaded_player;
-                            slimes = loaded_slimes;
-                            world_grid = loaded_world;
-                            render_grid = RenderGrid::new(&world_grid);
-                            entities = loaded_entities;
-                            player_inventory = loaded_inventory;
-                            dropped_items = loaded_items;
-                            attack_effects.clear();
-                            active_attack = None;
-                            println!("✓ Game loaded successfully!");
-                        }
-                        Err(e) => {
-                            eprintln!("Failed to load: {}", e);
-                        }
-                    }
-                }
-                Event::KeyDown {
-                    keycode: Some(Keycode::Return | Keycode::Space),
-                    ..
-                } if matches!(debug_menu_state, DebugMenuState::Open { .. }) => {
-                    if let DebugMenuState::Open { selected_index } = debug_menu_state {
-                        let items = DebugMenuItem::all();
-                        match items[selected_index] {
-                            DebugMenuItem::ClearInventory => {
-                                player_inventory.inventory.clear();
-                                println!("Player inventory cleared!");
-                            }
-                            _ => { /* Other debug menu items don't have an action on Enter/Space */ }
-                        }
-                    }
-                }
-                Event::KeyDown {
-                    keycode: Some(Keycode::F3),
-                    ..
-                } if game_state == GameState::Playing => {
-                    debug_menu_state = match debug_menu_state {
-                        DebugMenuState::Closed => {
-                            println!("Debug menu: OPEN");
-                            DebugMenuState::Open { selected_index: 0 }
-                        }
-                        DebugMenuState::Open { .. } => {
-                            println!("Debug menu: CLOSED");
-                            DebugMenuState::Closed
-                        }
-                    };
-                }
-                Event::KeyDown {
-                    keycode: Some(Keycode::Up),
-                    ..
-                } if matches!(debug_menu_state, DebugMenuState::Open { .. }) => {
-                    if let DebugMenuState::Open { selected_index } = debug_menu_state {
-                        let items = DebugMenuItem::all();
-                        let new_index = if selected_index == 0 {
-                            items.len() - 1
-                        } else {
-                            selected_index - 1
-                        };
-                        debug_menu_state = DebugMenuState::Open { selected_index: new_index };
-                    }
-                }
-                Event::KeyDown {
-                    keycode: Some(Keycode::Down),
-                    ..
-                } if matches!(debug_menu_state, DebugMenuState::Open { .. }) => {
-                    if let DebugMenuState::Open { selected_index } = debug_menu_state {
-                        let items = DebugMenuItem::all();
-                        let new_index = (selected_index + 1) % items.len();
-                        debug_menu_state = DebugMenuState::Open { selected_index: new_index };
-                    }
-                }
-                Event::KeyDown {
-                    keycode: Some(Keycode::Left),
-                    keymod,
-                    ..
-                } if matches!(debug_menu_state, DebugMenuState::Open { .. }) => {
-                    if let DebugMenuState::Open { selected_index } = debug_menu_state {
-                        let items = DebugMenuItem::all();
-                        let item = items[selected_index];
-                        let shift_held = keymod.intersects(sdl2::keyboard::Mod::LSHIFTMOD | sdl2::keyboard::Mod::RSHIFTMOD);
-                        let delta = if shift_held { -10.0 } else { -1.0 };
-
-                        match item {
-                            DebugMenuItem::PlayerMaxHealth => {
-                                let new_val = (player.stats.max_health + delta).max(1.0);
-                                player.stats.max_health = new_val;
-                                player.stats.health.set_max(new_val);
-                            }
-                            DebugMenuItem::PlayerAttackDamage => {
-                                player.stats.attack_damage = (player.stats.attack_damage + delta).max(0.0);
-                            }
-                            DebugMenuItem::PlayerAttackSpeed => {
-                                player.stats.attack_speed = (player.stats.attack_speed + delta).max(0.1);
-                            }
-                            DebugMenuItem::SlimeHealth => {
-                                debug_config.slime_base_health = (debug_config.slime_base_health as f32 + delta).max(1.0) as i32;
-                            }
-                            DebugMenuItem::SlimeContactDamage => {
-                                debug_config.slime_contact_damage = (debug_config.slime_contact_damage + delta).max(0.0);
-                            }
-                            DebugMenuItem::ClearInventory => {
-                                // This item doesn't change value with left/right, it's an action.
-                            }
-                        }
-                    }
-                }
-                Event::KeyDown {
-                    keycode: Some(Keycode::Right),
-                    keymod,
-                    ..
-                } if matches!(debug_menu_state, DebugMenuState::Open { .. }) => {
-                    if let DebugMenuState::Open { selected_index } = debug_menu_state {
-                        let items = DebugMenuItem::all();
-                        let item = items[selected_index];
-                        let shift_held = keymod.intersects(sdl2::keyboard::Mod::LSHIFTMOD | sdl2::keyboard::Mod::RSHIFTMOD);
-                        let delta = if shift_held { 10.0 } else { 1.0 };
-
-                        match item {
-                            DebugMenuItem::PlayerMaxHealth => {
-                                let new_val = player.stats.max_health + delta;
-                                player.stats.max_health = new_val;
-                                player.stats.health.set_max(new_val);
-                            }
-                            DebugMenuItem::PlayerAttackDamage => {
-                                player.stats.attack_damage += delta;
-                            }
-                            DebugMenuItem::PlayerAttackSpeed => {
-                                player.stats.attack_speed += delta;
-                            }
-                            DebugMenuItem::SlimeHealth => {
-                                debug_config.slime_base_health = (debug_config.slime_base_health as f32 + delta) as i32;
-                            }
-                            DebugMenuItem::SlimeContactDamage => {
-                                debug_config.slime_contact_damage += delta;
-                            }
-                            DebugMenuItem::ClearInventory => {
-                                // This item doesn't change value with left/right, it's an action.
-                            }
-                        }
-                    }
-                }
-                Event::KeyDown {
-                    keycode: Some(Keycode::M),
-                    ..
-                } if !is_ui_active => {
-                    if let Some(attack_event) = player.start_attack() {
-                        active_attack = Some(attack_event.clone());
-
-                        // Attack effect positioning
-                        // Player position is now anchor-based (bottom-center)
-                        // We want the effect centered on the player's body, then offset by direction
-
-                        // Calculate player's visual center from anchor
-                        let player_center_y = player.y - (player.height * SPRITE_SCALE) as i32 / 2;
-
-                        // Directional offset from player center
-                        // ADJUST THIS VALUE to change attack effect distance
-                        let offset = 20;
-                        let (offset_x, offset_y) = match player.direction {
-                            crate::animation::Direction::North => (0, -offset),
-                            crate::animation::Direction::NorthEast => (offset, -offset),
-                            crate::animation::Direction::East => (offset, 0),
-                            crate::animation::Direction::SouthEast => (offset, offset),
-                            crate::animation::Direction::South => (0, offset),
-                            crate::animation::Direction::SouthWest => (-offset, offset),
-                            crate::animation::Direction::West => (-offset, 0),
-                            crate::animation::Direction::NorthWest => (-offset, -offset),
-                        };
-
-                        // Calculate effect center position
-                        let effect_center_x = player.x + offset_x;
-                        let effect_center_y = player_center_y + offset_y;
-
-                        // Convert to top-left (AttackEffect uses top-left positioning)
-                        // Effect is 32x32 at 2x scale = 64x64
-                        let effect_size = 32 * SPRITE_SCALE as i32;
-                        let effect_x = effect_center_x - effect_size / 2;
-                        let effect_y = effect_center_y - effect_size / 2;
-
-                        match punch_config.create_controller(&punch_texture, &["punch"]) {
-                            Ok(punch_animation_controller) => {
-                                attack_effects.push(AttackEffect::new(
-                                    effect_x,
-                                    effect_y,
-                                    32,
-                                    32,
-                                    player.direction,
-                                    punch_animation_controller,
-                                ));
-                            }
-                            Err(e) => {
-                                eprintln!("ERROR: Failed to create punch controller: {}", e);
-                            }
-                        }
-                    }
-                }
-                Event::KeyDown {
-                    keycode: Some(Keycode::B),
-                    ..
-                } if !is_ui_active => {
-                    show_collision_boxes = !show_collision_boxes;
-                    println!("Collision boxes: {}", if show_collision_boxes { "ON" } else { "OFF" });
-                }
-                Event::KeyDown {
-                    keycode: Some(Keycode::G),
-                    ..
-                } if !is_ui_active => {
-                    show_tile_grid = !show_tile_grid;
-                    println!("Tile grid debug: {}", if show_tile_grid { "ON" } else { "OFF" });
-                }
-                Event::KeyDown {
-                    keycode: Some(Keycode::I),
-                    ..
-                } => {
-                    inventory_ui.toggle();
-                }
-                // Number keys (1-9) to select hotbar slots
-                Event::KeyDown {
-                    keycode: Some(Keycode::Num1),
-                    ..
-                } if !is_ui_active => {
-                    player_inventory.set_hotbar_slot(0);
-                }
-                Event::KeyDown {
-                    keycode: Some(Keycode::Num2),
-                    ..
-                } if !is_ui_active => {
-                    player_inventory.set_hotbar_slot(1);
-                }
-                Event::KeyDown {
-                    keycode: Some(Keycode::Num3),
-                    ..
-                } if !is_ui_active => {
-                    player_inventory.set_hotbar_slot(2);
-                }
-                Event::KeyDown {
-                    keycode: Some(Keycode::Num4),
-                    ..
-                } if !is_ui_active => {
-                    player_inventory.set_hotbar_slot(3);
-                }
-                Event::KeyDown {
-                    keycode: Some(Keycode::Num5),
-                    ..
-                } if !is_ui_active => {
-                    player_inventory.set_hotbar_slot(4);
-                }
-                Event::KeyDown {
-                    keycode: Some(Keycode::Num6),
-                    ..
-                } if !is_ui_active => {
-                    player_inventory.set_hotbar_slot(5);
-                }
-                Event::KeyDown {
-                    keycode: Some(Keycode::Num7),
-                    ..
-                } if !is_ui_active => {
-                    player_inventory.set_hotbar_slot(6);
-                }
-                Event::KeyDown {
-                    keycode: Some(Keycode::Num8),
-                    ..
-                } if !is_ui_active => {
-                    player_inventory.set_hotbar_slot(7);
-                }
-                Event::KeyDown {
-                    keycode: Some(Keycode::Num9),
-                    ..
-                } if !is_ui_active => {
-                    player_inventory.set_hotbar_slot(8);
-                }
-                Event::KeyDown {
-                    keycode: Some(Keycode::P),
-                    ..
-                } if inventory_ui.is_open => {
-                    // Give a stack of 16 slime balls to the player
-                    match player_inventory.quick_add("slime_ball", 16, &item_registry) {
-                        Ok(0) => println!("Added 16 slime balls to inventory."),
-                        Ok(overflow) => println!("Inventory full. {} slime balls could not be added.", overflow),
-                        Err(e) => eprintln!("Error adding slime balls: {}", e),
-                    }
-                }
-                Event::KeyDown {
-                    keycode: Some(Keycode::H),
-                    ..
-                } if inventory_ui.is_open => {
-                    // Give a hoe to the player (debug command)
-                    match player_inventory.quick_add("hoe", 1, &item_registry) {
-                        Ok(0) => println!("Added hoe to inventory."),
-                        Ok(_overflow) => println!("Inventory full. Hoe could not be added."),
-                        Err(e) => eprintln!("Error adding hoe: {}", e),
-                    }
-                }
-                Event::MouseButtonDown { mouse_btn, x, y, .. } => {
-                    // Handle inventory/hotbar clicks (hotbar works even when inventory is closed)
-                    if game_state == GameState::Playing {
-                        let (screen_width, screen_height) = canvas.logical_size();
-                        // TODO: Add shift-click support for inventory. Currently can't check keyboard_state
-                        // during event loop due to borrowing constraints. Need to refactor event handling.
-                        let shift_held = false;
-                        inventory_ui.handle_mouse_click(x, y, screen_width, screen_height, &mut player_inventory, shift_held, mouse_btn)?;
-                    }
-
-                    if !is_ui_active {
-                        if mouse_btn == sdl2::mouse::MouseButton::Right {
-                            let slime_animation_controller = slime_config.create_controller(
-                                &slime_texture,
-                                &["slime_idle", "jump", "slime_damage", "slime_death"],
-                            )?;
-
-                            // Spawn slime so that click position = collision box center
-                            // This makes spawning intuitive and easier for procedural generation
-                            //
-                            // Slime uses anchor positioning internally (bottom-center of sprite)
-                            // but we want the click to target the collision box center (visible body)
-                            //
-                            // To calculate anchor from desired collision center:
-                            // anchor = click - collision_offset - (collision_size / 2)
-                            let temp_slime = Slime::new(0, 0, AnimationController::new());
-                            let anchor_x = x - (temp_slime.hitbox_offset_x * SPRITE_SCALE as i32) - (temp_slime.hitbox_width * SPRITE_SCALE / 2) as i32;
-                            let anchor_y = y - (temp_slime.hitbox_offset_y * SPRITE_SCALE as i32) - (temp_slime.hitbox_height * SPRITE_SCALE / 2) as i32;
-
-                            let mut new_slime = Slime::new(anchor_x, anchor_y, slime_animation_controller);
-                            new_slime.health = debug_config.slime_base_health;
-                            slimes.push(new_slime);
-                        }
-
-                        // Check if player has a hoe selected in hotbar
-                        if let Some(selected_item) = player_inventory.get_selected_hotbar() {
-                            if let Some(item_def) = item_registry.get(&selected_item.item_id) {
-                                if let ItemProperties::Tool { tool_type: ToolType::Hoe, .. } = item_def.properties {
-                                    // Player has a hoe selected, allow tilling
-                                    is_tilling = true;
-                                    let tile_x = x / 32;
-                                    let tile_y = y / 32;
-
-                                    // Only allow grass -> dirt conversion
-                                    if world_grid.get_tile(tile_x, tile_y) == Some(TileId::Grass) {
-                                        if world_grid.set_tile(tile_x, tile_y, TileId::Dirt) {
-                                            render_grid.update_tile_and_neighbors(&world_grid, tile_x, tile_y);
-                                            last_tilled_tile = Some((tile_x, tile_y));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                Event::MouseButtonUp { mouse_btn: sdl2::mouse::MouseButton::Left, x, y, .. } => {
-                    is_tilling = false;
-                    last_tilled_tile = None;
-
-                    // If an item is held and mouse is released outside all inventory UI (hotbar + window), drop it
-                    if game_state == GameState::Playing && inventory_ui.held_item.is_some() {
-                        let (screen_width, screen_height) = canvas.logical_size();
-                        if !inventory_ui.is_mouse_over_any_inventory(x, y, screen_width, screen_height) {
-                            if let Some(item_stack) = inventory_ui.held_item.take() {
-                                // Spawn dropped item at player's position
-                                let mut item_animation_controller = animation::AnimationController::new();
-                                let item_frames = vec![
-                                    sprite::Frame::new(0, 0, 32, 32, 300),
-                                ];
-                                let item_texture = item_textures.get(&item_stack.item_id).ok_or(format!("Missing texture for item {}", item_stack.item_id))?;
-                                let item_sprite_sheet = SpriteSheet::new(item_texture, item_frames);
-                                item_animation_controller.add_animation("item_idle".to_string(), item_sprite_sheet);
-                                item_animation_controller.set_state("item_idle".to_string());
-
-                                let dropped_item = DroppedItem::new(
-                                    player.x,
-                                    player.y,
-                                    item_stack.item_id.clone(),
-                                    item_stack.quantity,
-                                    item_animation_controller,
-                                );
-                                dropped_items.push(dropped_item);
-                                println!("Dropped {} x{} at ({}, {})", item_stack.item_id, item_stack.quantity, player.x, player.y);
-                            }
-                        }
-                    }
-                }
-                Event::MouseMotion { x, y, .. } => {
-                    mouse_x = x;
-                    mouse_y = y;
-                    if is_tilling && !is_ui_active {
-                        let tile_x = x / 32;
-                        let tile_y = y / 32;
-
-                        if last_tilled_tile != Some((tile_x, tile_y)) {
-                            // Only allow grass -> dirt conversion
-                            if world_grid.get_tile(tile_x, tile_y) == Some(TileId::Grass) {
-                                if world_grid.set_tile(tile_x, tile_y, TileId::Dirt) {
-                                    render_grid.update_tile_and_neighbors(&world_grid, tile_x, tile_y);
-                                    last_tilled_tile = Some((tile_x, tile_y));
-                                }
-                            }
-                        }
-                    }
-                }
-
-                _ => {} // Ignore other events
-            }
+        'running: loop {
+        // PHASE 1: Handle input events
+        if handle_events(
+            &mut event_pump,
+            &mut game_state,
+            &mut debug_menu_state,
+            &mut player,
+            &mut slimes,
+            &mut entities,
+            &mut world_grid,
+            &mut render_grid,
+            &mut player_inventory,
+            &mut dropped_items,
+            &mut active_attack,
+            &mut attack_effects,
+            &mut save_exit_menu,
+            &mut death_screen,
+            &mut inventory_ui,
+            &mut save_manager,
+            &mut debug_config,
+            &mut is_tilling,
+            &mut last_tilled_tile,
+            &mut show_collision_boxes,
+            &mut show_tile_grid,
+            &mut mouse_x,
+            &mut mouse_y,
+            &player_config,
+            &slime_config,
+            &punch_config,
+            &character_texture,
+            &slime_texture,
+            &entity_texture,
+            &punch_texture,
+            &item_textures,
+            &item_registry,
+            &mut canvas,
+        )? {
+            break 'running; // Quit requested
         }
 
-        let keyboard_state_for_player_update = event_pump.keyboard_state();
+        let is_ui_active = inventory_ui.is_open ||
+                           matches!(debug_menu_state, DebugMenuState::Open { .. }) ||
+                           game_state == GameState::ExitMenu ||
+                           game_state == GameState::Dead;
 
+        // PHASE 2: Update game state
         if game_state == GameState::Playing && !is_ui_active {
+            // Check for player death
             if player.state.is_dead() {
                 game_state = GameState::Dead;
                 death_screen.trigger();
                 println!("Player died!");
             }
 
-            player.update(&keyboard_state_for_player_update);
-
-            if let Some(ref attack) = active_attack {
-                let attack_hitbox = attack.get_hitbox();
-
-                for slime in &mut slimes {
-                    let slime_bounds = slime.get_bounds();
-
-                    if collision::aabb_intersect(&attack_hitbox, &slime_bounds) {
-                        slime.take_damage(attack.damage as i32);
-                    }
-                }
-
-                for entity in &mut entities {
-                    if let Some(state_before_hit) = entity.check_hit(&attack_hitbox) {
-                        // Drop stone only if entity was not in Awake state
-                        if state_before_hit != the_entity::EntityState::Awake {
-                            // Create stone drop at entity center
-                            let drop_x = entity.x + (entity.width as i32) / 2;
-                            let drop_y = entity.y + (entity.height as i32) / 2;
-
-                            // Create animation controller for the stone item
-                            let mut item_animation_controller = animation::AnimationController::new();
-                            let item_frames = vec![sprite::Frame::new(0, 0, 32, 32, 300)];
-
-                            if let Some(item_texture) = item_textures.get("stone") {
-                                let item_sprite_sheet = sprite::SpriteSheet::new(item_texture, item_frames);
-                                item_animation_controller.add_animation("item_idle".to_string(), item_sprite_sheet);
-                                item_animation_controller.set_state("item_idle".to_string());
-
-                                let dropped_item = dropped_item::DroppedItem::new(
-                                    drop_x,
-                                    drop_y,
-                                    "stone".to_string(),
-                                    1,
-                                    item_animation_controller,
-                                );
-                                dropped_items.push(dropped_item);
-                            }
-                        }
-                    }
-                }
-
-                active_attack = None;
-            }
-
-            for slime in &mut slimes {
-                slime.update();
-            }
-
-            let delta_time = 1.0 / 60.0;
-            for entity in &mut entities {
-                entity.update(delta_time);
-            }
-
-            for text in &mut floating_texts {
-                text.lifetime += delta_time;
-                text.y -= 20.0 * delta_time;
-            }
-            floating_texts.retain(|text| text.lifetime < text.max_lifetime);
-
-            player.active_modifiers.clear();
-            has_regen = false;
-            for entity in &entities {
-                if entity.state == EntityState::Awake {
-                    match entity.entity_type {
-                        EntityType::Attack => {
-                            player.active_modifiers.push(ModifierEffect {
-                                stat_type: StatType::AttackDamage,
-                                modifier: StatModifier::Flat(1.0),
-                                duration: None,
-                                source: "Pyramid of Attack".to_string(),
-                            });
-                        }
-                        EntityType::Defense => {
-                            player.active_modifiers.push(ModifierEffect {
-                                stat_type: StatType::Defense,
-                                modifier: StatModifier::Flat(1.0),
-                                duration: None,
-                                source: "Pyramid of Defense".to_string(),
-                            });
-                        }
-                        EntityType::Speed => {
-                            player.active_modifiers.push(ModifierEffect {
-                                stat_type: StatType::MovementSpeed,
-                                modifier: StatModifier::Flat(1.0),
-                                duration: None,
-                                source: "Pyramid of Speed".to_string(),
-                            });
-                        }
-                        EntityType::Regeneration => {
-                            has_regen = true;
-                        }
-                    }
-                }
-            }
-
-            if has_regen && regen_timer.elapsed().as_secs_f32() >= regen_interval {
-                if player.stats.health.current() < player.stats.max_health {
-                    player.stats.health.heal(2.0);
-
-                    // Player position is now at anchor (bottom-center)
-                    // x is already centered, y should be above player's head
-                    floating_texts.push(FloatingTextInstance {
-                        x: player.x as f32,
-                        y: (player.y - (player.height * SPRITE_SCALE) as i32) as f32,
-                        text: "+2".to_string(),
-                        color: Color::RGB(0, 255, 0),
-                        lifetime: 0.0,
-                        max_lifetime: 1.5,
-                    });
-
-                    for entity in &entities {
-                        if entity.state == EntityState::Awake && entity.entity_type == EntityType::Regeneration {
-                            floating_texts.push(FloatingTextInstance {
-                                x: entity.x as f32 + 16.0,
-                                y: entity.y as f32,
-                                text: "+2".to_string(),
-                                color: Color::RGB(0, 255, 0),
-                                lifetime: 0.0,
-                                max_lifetime: 1.5,
-                            });
-                            break; // Only one regen entity
-                        }
-                    }
-                }
-                regen_timer = Instant::now();
-            }
+            let keyboard_state_for_player_update = event_pump.keyboard_state();
+            update_world(
+                &mut player,
+                &mut slimes,
+                &mut entities,
+                &mut dropped_items,
+                &mut player_inventory,
+                &mut active_attack,
+                &mut attack_effects,
+                &mut floating_texts,
+                &static_objects,
+                &mut has_regen,
+                &mut regen_timer,
+                regen_interval,
+                &debug_config,
+                &item_textures,
+                &item_registry,
+                &keyboard_state_for_player_update,
+            )?;
         }
 
+        // Handle death screen respawn
         if game_state == GameState::Dead {
             if death_screen.should_respawn() {
                 player.respawn(GAME_WIDTH as i32 / 2, GAME_HEIGHT as i32 / 2);
@@ -1359,149 +1621,7 @@ fn main() -> Result<(), String> {
             }
         }
 
-        for effect in &mut attack_effects {
-            effect.update();
-        }
-
-        attack_effects.retain(|effect| !effect.is_finished());
-
-        let colliding_slime_indices = check_collisions_with_collection(&player, &slimes);
-
-        for slime_index in colliding_slime_indices {
-            let player_bounds = player.get_bounds();
-            let slime_bounds = slimes[slime_index].get_bounds();
-
-            let (overlap_x, overlap_y) = calculate_overlap(&player_bounds, &slime_bounds);
-
-            if overlap_x.abs() < overlap_y.abs() {
-                player.apply_push(-overlap_x * 3 / 10, 0);
-                slimes[slime_index].apply_push(overlap_x * 7 / 10, 0);
-            } else {
-                player.apply_push(0, -overlap_y * 3 / 10);
-                slimes[slime_index].apply_push(0, overlap_y * 7 / 10);
-            }
-
-            if !player.is_attacking && !slimes[slime_index].is_invulnerable() {
-                let damage = DamageEvent::physical(debug_config.slime_contact_damage, DamageSource::Enemy);
-                let damage_result = player.take_damage(damage);
-                if damage_result.is_fatal {
-                    // Drop all items from player inventory
-                    for item_stack_option in player_inventory.inventory.slots.iter_mut() {
-                        if let Some(item_stack) = item_stack_option.take() {
-                            let mut item_animation_controller = animation::AnimationController::new();
-                            let item_frames = vec![
-                                sprite::Frame::new(0, 0, 32, 32, 300),
-                            ];
-                            let item_texture = item_textures.get(&item_stack.item_id).ok_or(format!("Missing texture for item {}", item_stack.item_id))?;
-                            let item_sprite_sheet = SpriteSheet::new(item_texture, item_frames);
-                            item_animation_controller.add_animation("item_idle".to_string(), item_sprite_sheet);
-                            item_animation_controller.set_state("item_idle".to_string());
-
-                            let dropped_item = DroppedItem::new(
-                                player.x,
-                                player.y,
-                                item_stack.item_id.clone(),
-                                item_stack.quantity,
-                                item_animation_controller,
-                            );
-                            dropped_items.push(dropped_item);
-                        }
-                    }
-                    println!("Player died and dropped all items.");
-                }
-            }
-        }
-
-        for slime in &mut slimes {
-            if slime.is_dying() && !slime.has_dropped_loot {
-                slime.has_dropped_loot = true;
-                let mut item_animation_controller = animation::AnimationController::new();
-
-                let item_frames = vec![
-                    sprite::Frame::new(0, 0, 32, 32, 300),
-                ];
-
-                let item_texture = item_textures.get("slime_ball").ok_or("Missing slime_ball texture in item_textures map")?;
-
-                let item_sprite_sheet = SpriteSheet::new(item_texture, item_frames);
-
-                item_animation_controller.add_animation("item_idle".to_string(), item_sprite_sheet);
-                item_animation_controller.set_state("item_idle".to_string());
-
-                // Drop item at center of slime's collision box (visible body center)
-                let drop_x = slime.x + (slime.hitbox_offset_x * SPRITE_SCALE as i32) + (slime.hitbox_width * SPRITE_SCALE / 2) as i32;
-                let drop_y = slime.y + (slime.hitbox_offset_y * SPRITE_SCALE as i32) + (slime.hitbox_height * SPRITE_SCALE / 2) as i32;
-
-                let dropped_item = DroppedItem::new(
-                    drop_x,
-                    drop_y,
-                    "slime_ball".to_string(),
-                    1,
-                    item_animation_controller,
-                );
-
-                dropped_items.push(dropped_item);
-            }
-        }
-
-        slimes.retain(|slime| slime.is_alive);
-
-        let player_bounds = player.get_bounds();
-        dropped_items.retain(|item| {
-            if !item.can_pickup {
-                return true; // Keep items in cooldown
-            }
-
-            if player_bounds.has_intersection(item.get_bounds()) {
-                match player_inventory.quick_add(&item.item_id, item.quantity, &item_registry) {
-                    Ok(overflow) => {
-                        if overflow == 0 {
-                            // Fully picked up
-                            println!("✓ Picked up {} x{}", item.item_id, item.quantity);
-                            false // Remove from world
-                        } else {
-                            println!("⚠ Inventory full! {} items couldn't fit", overflow);
-                            true // Keep in world
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to pickup item: {}", e);
-                        true // Keep in world on error
-                    }
-                }
-            } else {
-                true // Keep if not colliding
-            }
-        });
-
-        dropped_items.retain_mut(|item| !item.update()); // Remove if despawned
-
-        let mut all_static_collidables: Vec<&dyn StaticCollidable> = Vec::new();
-        for obj in &static_objects {
-            all_static_collidables.push(obj);
-        }
-        for entity in &entities {
-            all_static_collidables.push(entity);
-        }
-
-        let static_collisions = check_static_collisions(&player, &all_static_collidables);
-
-        for obj_index in static_collisions {
-            let player_bounds = player.get_bounds();
-            let obj_bounds = all_static_collidables[obj_index].get_bounds();
-
-            let (overlap_x, overlap_y) = calculate_overlap(&player_bounds, &obj_bounds);
-
-            // Push player out completely (100% push on player, 0% on static object)
-            if overlap_x.abs() < overlap_y.abs() {
-                // Push on X axis
-                player.apply_push(-overlap_x, 0);
-            } else {
-                // Push on Y axis
-                player.apply_push(0, -overlap_y);
-            }
-        }
-
+        // PHASE 3: Render
         canvas.set_draw_color(sdl2::pixels::Color::RGB(0, 0, 0));
         canvas.clear();
 
