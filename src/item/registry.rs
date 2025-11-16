@@ -7,6 +7,7 @@ use super::properties::*;
 /// This is the single source of truth for what items exist in the game.
 /// All item references (in inventories, drops, saves) use IDs that
 /// look up definitions in this registry.
+#[derive(Clone)]
 pub struct ItemRegistry {
     items: HashMap<String, ItemDefinition>,
 }

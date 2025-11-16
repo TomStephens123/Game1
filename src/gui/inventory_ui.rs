@@ -251,21 +251,83 @@ impl<'a> InventoryUI<'a> {
                 match mouse_button {
                     sdl2::mouse::MouseButton::Left => {
                         if shift_held {
-                            // Shift-left-click: transfer item
-                            if index < HOTBAR_SLOTS { // Clicked on hotbar
-                                let item_stack_option = player_inventory.inventory.slots[index].take();
-                                if let Some(item_stack) = item_stack_option {
-                                    let overflow = player_inventory.inventory.add_item(&item_stack.item_id, item_stack.quantity, self.item_registry)?;
-                                    if overflow > 0 {
-                                        player_inventory.inventory.slots[index] = Some(ItemStack::new(&item_stack.item_id, overflow));
+                            // Shift-left-click: transfer item between hotbar and main inventory
+                            if index < HOTBAR_SLOTS {
+                                // Clicked on hotbar - move to main inventory (slots 9-26)
+                                if let Some(item_stack) = player_inventory.inventory.slots[index].take() {
+                                    // Try to add to main inventory slots only (9-26)
+                                    let mut remaining = item_stack.quantity;
+
+                                    // First, try to stack with existing items in main inventory
+                                    for i in HOTBAR_SLOTS..27 {
+                                        if let Some(existing_stack) = &mut player_inventory.inventory.slots[i] {
+                                            if existing_stack.item_id == item_stack.item_id {
+                                                if let Some(item_def) = self.item_registry.get(&item_stack.item_id) {
+                                                    let can_add = item_def.max_stack_size.saturating_sub(existing_stack.quantity);
+                                                    let to_add = remaining.min(can_add);
+                                                    existing_stack.quantity += to_add;
+                                                    remaining -= to_add;
+                                                    if remaining == 0 {
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Then, try to fill empty slots in main inventory
+                                    if remaining > 0 {
+                                        for i in HOTBAR_SLOTS..27 {
+                                            if player_inventory.inventory.slots[i].is_none() {
+                                                player_inventory.inventory.slots[i] = Some(ItemStack::new(&item_stack.item_id, remaining));
+                                                remaining = 0;
+                                                break;
+                                            }
+                                        }
+                                    }
+
+                                    // If couldn't fit all, put remainder back in hotbar
+                                    if remaining > 0 {
+                                        player_inventory.inventory.slots[index] = Some(ItemStack::new(&item_stack.item_id, remaining));
                                     }
                                 }
-                            } else { // Clicked on main inventory
-                                let item_stack_option = player_inventory.inventory.slots[index].take();
-                                if let Some(item_stack) = item_stack_option {
-                                    let overflow = player_inventory.inventory.add_item(&item_stack.item_id, item_stack.quantity, self.item_registry)?;
-                                    if overflow > 0 {
-                                        player_inventory.inventory.slots[index] = Some(ItemStack::new(&item_stack.item_id, overflow));
+                            } else {
+                                // Clicked on main inventory - move to hotbar (slots 0-8)
+                                if let Some(item_stack) = player_inventory.inventory.slots[index].take() {
+                                    // Try to add to hotbar slots only (0-8)
+                                    let mut remaining = item_stack.quantity;
+
+                                    // First, try to stack with existing items in hotbar
+                                    for i in 0..HOTBAR_SLOTS {
+                                        if let Some(existing_stack) = &mut player_inventory.inventory.slots[i] {
+                                            if existing_stack.item_id == item_stack.item_id {
+                                                if let Some(item_def) = self.item_registry.get(&item_stack.item_id) {
+                                                    let can_add = item_def.max_stack_size.saturating_sub(existing_stack.quantity);
+                                                    let to_add = remaining.min(can_add);
+                                                    existing_stack.quantity += to_add;
+                                                    remaining -= to_add;
+                                                    if remaining == 0 {
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Then, try to fill empty slots in hotbar
+                                    if remaining > 0 {
+                                        for i in 0..HOTBAR_SLOTS {
+                                            if player_inventory.inventory.slots[i].is_none() {
+                                                player_inventory.inventory.slots[i] = Some(ItemStack::new(&item_stack.item_id, remaining));
+                                                remaining = 0;
+                                                break;
+                                            }
+                                        }
+                                    }
+
+                                    // If couldn't fit all, put remainder back in main inventory
+                                    if remaining > 0 {
+                                        player_inventory.inventory.slots[index] = Some(ItemStack::new(&item_stack.item_id, remaining));
                                     }
                                 }
                             }

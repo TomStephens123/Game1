@@ -581,7 +581,7 @@ mod tests {
     #[test]
     fn test_collision_bounds_calculation() {
         // Test the math for collision bounds
-        let width = 32u32;
+        let _width = 32u32;
         let height = 32u32;
         let scale = 2u32;
 
