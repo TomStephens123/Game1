@@ -24,10 +24,9 @@ mod tile;
 mod ui;
 
 use animation::{AnimationConfig, AnimationController};
-use attack_effect::AttackEffect;
 use collision::{
     calculate_overlap, check_collisions_with_collection, check_static_collisions, Collidable,
-    StaticCollidable, StaticObject,
+    StaticCollidable,
 };
 use combat::{DamageEvent, DamageSource};
 use dropped_item::DroppedItem;
@@ -39,7 +38,6 @@ use render::render_with_depth_sorting;
 use save::{SaveManager, SaveFile, SaveMetadata, SaveType, WorldSaveData, EntitySaveData, Saveable, SaveData, CURRENT_SAVE_VERSION};
 use slime::Slime;
 use sprite::SpriteSheet;
-use stats::{ModifierEffect, StatModifier, StatType};
 use text::draw_simple_text;
 use the_entity::{TheEntity, EntityState, EntityType};
 use tile::{TileId, WorldGrid, RenderGrid};
@@ -48,74 +46,18 @@ use std::time::{SystemTime, Instant};
 use serde::Deserialize;
 use std::collections::HashMap;
 
-// Import types from game module
-use game::{GameState, FloatingTextInstance, DebugMenuState, DebugMenuItem, DebugConfig, GameTextures, GameWorld};
+// Import from game module
+use game::{GameState, DebugMenuState, DebugMenuItem, DebugConfig,
+           GameTextures, GameWorld, Systems, UIManager};
 
 // Game resolution constants
 const GAME_WIDTH: u32 = 640;
 const GAME_HEIGHT: u32 = 360;
 const SPRITE_SCALE: u32 = 2;
 
-/// Systems holds configuration data and helper systems
-/// This struct contains things that configure gameplay but aren't entities
-pub struct Systems {
-    pub player_config: AnimationConfig,
-    pub slime_config: AnimationConfig,
-    pub punch_config: AnimationConfig,
-    pub debug_config: DebugConfig,
-    pub static_objects: Vec<StaticObject>,
-    pub regen_timer: Instant,
-    pub regen_interval: f32,
-    pub has_regen: bool,
-}
-
-impl Systems {
-    /// Create systems with default configuration
-    pub fn new(
-        player_config: AnimationConfig,
-        slime_config: AnimationConfig,
-        punch_config: AnimationConfig,
-    ) -> Self {
-        let boundary_thickness = 10;
-        let static_objects = vec![
-            StaticObject::new(0, -(boundary_thickness as i32), GAME_WIDTH, boundary_thickness),
-            StaticObject::new(-(boundary_thickness as i32), 0, boundary_thickness, GAME_HEIGHT),
-            StaticObject::new(GAME_WIDTH as i32, 0, boundary_thickness, GAME_HEIGHT),
-            StaticObject::new(0, GAME_HEIGHT as i32, GAME_WIDTH, boundary_thickness),
-        ];
-
-        Systems {
-            player_config,
-            slime_config,
-            punch_config,
-            debug_config: DebugConfig::new(),
-            static_objects,
-            regen_timer: Instant::now(),
-            regen_interval: 5.0,
-            has_regen: false,
-        }
-    }
-}
-
-/// UIManager holds all UI state and components
-/// This struct manages menus, HUD elements, and debug overlays
-pub struct UIManager<'a> {
-    pub save_exit_menu: SaveExitMenu,
-    pub death_screen: DeathScreen,
-    pub inventory_ui: InventoryUI<'a>,
-    pub player_health_bar: HealthBar,
-    pub enemy_health_bar: HealthBar,
-    pub floating_text_renderer: FloatingText,
-    pub buff_display: BuffDisplay<'a>,
-    pub debug_menu_state: DebugMenuState,
-    pub show_collision_boxes: bool,
-    pub show_tile_grid: bool,
-    pub is_tilling: bool,
-    pub last_tilled_tile: Option<(i32, i32)>,
-    pub mouse_x: i32,
-    pub mouse_y: i32,
-}
-
+// Extracted to game/types.rs
+// GameWorld struct and impl extracted to game/world.rs
+// Systems struct and impl extracted to game/systems.rs
 /// Main game struct that owns all game state
 /// This is the top-level orchestrator for the entire game
 pub struct Game<'a> {
@@ -142,8 +84,6 @@ pub struct Game<'a> {
 }
 
 impl<'a> Game<'a> {
-    /// NEW IMPLEMENTATION - Handle all input events using InputSystem
-    /// Returns true if the game should quit
     pub fn handle_events(&mut self) -> Result<bool, String> {
         // Build UI state for input system
         let ui_state = input_system::UIState {

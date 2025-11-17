@@ -23,3 +23,5 @@ pub mod rendering;
 // Re-export types for convenience
 pub use types::*;
 pub use world::GameWorld;
+pub use systems::Systems;
+pub use ui_manager::UIManager;
