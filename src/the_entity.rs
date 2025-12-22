@@ -470,11 +470,14 @@ impl DepthSortable for TheEntity<'_> {
         self.y + (self.height * SPRITE_SCALE) as i32
     }
 
-    fn render(&self, canvas: &mut Canvas<Window>) -> Result<(), String> {
-        // Render the sprite at the entity's position
+    fn render(&self, canvas: &mut Canvas<Window>, camera: &crate::camera::Camera) -> Result<(), String> {
+        // Transform world position to screen position using camera
+        let (screen_x, screen_y) = camera.world_to_screen(self.x, self.y);
+
+        // Render the sprite at the screen position
         let dest_rect = Rect::new(
-            self.x,
-            self.y,
+            screen_x,
+            screen_y,
             self.width * SPRITE_SCALE,
             self.sprite_height * SPRITE_SCALE,
         );

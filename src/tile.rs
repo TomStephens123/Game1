@@ -202,15 +202,39 @@ impl RenderGrid {
         }
     }
 
-    pub fn render(&self, canvas: &mut WindowCanvas, texture: &Texture) -> Result<(), String> {
+    pub fn render(&self, canvas: &mut WindowCanvas, camera: &crate::camera::Camera, texture: &Texture) -> Result<(), String> {
         let tile_size = 32;  // World tile size
         let sprite_tile_size = 16;  // Sprite sheet tile size (64x64 / 4 = 16)
 
-        for row in &self.tiles {
-            for render_tile in row {
+        // Get camera bounds for culling (only render visible tiles)
+        let camera_bounds = camera.get_world_bounds();
+        let tile_margin = tile_size as i32; // Small margin to prevent pop-in
+
+        // Calculate visible tile range
+        let start_tile_x = ((camera_bounds.x() - tile_margin) / tile_size as i32).max(0) as usize;
+        let start_tile_y = ((camera_bounds.y() - tile_margin) / tile_size as i32).max(0) as usize;
+        let end_tile_x = ((camera_bounds.x() + camera_bounds.width() as i32 + tile_margin) / tile_size as i32 + 1)
+            .min(self.width as i32) as usize;
+        let end_tile_y = ((camera_bounds.y() + camera_bounds.height() as i32 + tile_margin) / tile_size as i32 + 1)
+            .min(self.height as i32) as usize;
+
+        // Only render visible tiles (culling optimization)
+        for tile_y in start_tile_y..end_tile_y {
+            if tile_y >= self.tiles.len() {
+                break;
+            }
+            for tile_x in start_tile_x..end_tile_x {
+                if tile_x >= self.tiles[tile_y].len() {
+                    break;
+                }
+                let render_tile = &self.tiles[tile_y][tile_x];
+
                 // Calculate world position (offset by half tile)
-                let x = (render_tile.grid_x * tile_size) - 16;
-                let y = (render_tile.grid_y * tile_size) - 16;
+                let world_x = (render_tile.grid_x * tile_size) - 16;
+                let world_y = (render_tile.grid_y * tile_size) - 16;
+
+                // Transform world position to screen position using camera
+                let (screen_x, screen_y) = camera.world_to_screen(world_x, world_y);
 
                 // Calculate sprite sheet position
                 let (sx, sy) = index_to_sprite_coords(render_tile.sprite_index);
@@ -222,7 +246,7 @@ impl RenderGrid {
                     sprite_tile_size as u32,
                 );
 
-                let dst_rect = Rect::new(x, y, tile_size as u32, tile_size as u32);
+                let dst_rect = Rect::new(screen_x, screen_y, tile_size as u32, tile_size as u32);
 
                 canvas.copy(texture, Some(src_rect), Some(dst_rect))
                     .map_err(|e| format!("Tile render error: {}", e))?;

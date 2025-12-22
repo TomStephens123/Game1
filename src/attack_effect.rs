@@ -60,11 +60,16 @@ impl<'a> AttackEffect<'a> {
     ///
     /// # Parameters
     /// - `canvas`: The SDL2 canvas to draw on
+    /// - `camera`: The camera for world-to-screen transformation
     /// - `scale`: Rendering scale (usually 3 to match player scale)
-    pub fn render(&self, canvas: &mut Canvas<Window>, scale: u32) -> Result<(), String> {
+    pub fn render(&self, canvas: &mut Canvas<Window>, camera: &crate::camera::Camera, scale: u32) -> Result<(), String> {
         let scaled_width = self.width * scale;
         let scaled_height = self.height * scale;
-        let dest_rect = Rect::new(self.x, self.y, scaled_width, scaled_height);
+
+        // Transform world position to screen position using camera
+        let (screen_x, screen_y) = camera.world_to_screen(self.x, self.y);
+
+        let dest_rect = Rect::new(screen_x, screen_y, scaled_width, scaled_height);
 
         if let Some(sprite_sheet) = self.animation_controller.get_current_sprite_sheet() {
             // Rotate sprite to match direction

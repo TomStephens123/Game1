@@ -286,7 +286,7 @@ impl DepthSortable for StaticObject {
         self.y
     }
 
-    fn render(&self, _canvas: &mut Canvas<Window>) -> Result<(), String> {
+    fn render(&self, _canvas: &mut Canvas<Window>, _camera: &crate::camera::Camera) -> Result<(), String> {
         // Simple static objects (like boundary walls) don't render visually
         // They only exist for collision detection
         // More complex static objects (trees, rocks) would have sprite rendering here

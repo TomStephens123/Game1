@@ -4,6 +4,7 @@ use sdl2::rect::Rect;
 
 mod animation;
 mod attack_effect;
+mod camera;
 mod collision;
 mod combat;
 mod dropped_item;
@@ -24,6 +25,7 @@ mod tile;
 mod ui;
 
 use animation::{AnimationConfig, AnimationController};
+use camera::Camera;
 use collision::{
     calculate_overlap, check_collisions_with_collection, check_static_collisions, Collidable,
     StaticCollidable,
@@ -66,6 +68,9 @@ pub struct Game<'a> {
     pub systems: Systems,
     pub ui: UIManager<'a>,
     pub game_state: GameState,
+
+    // Camera system
+    pub camera: Camera,
 
     // SDL2 components
     pub canvas: sdl2::render::Canvas<sdl2::video::Window>,
@@ -609,6 +614,13 @@ impl<'a> Game<'a> {
         // Phase 8: Cleanup dead entities
         self.world.cleanup_dead_entities();
 
+        // Phase 9: Camera update (follows player)
+        self.camera.set_target(
+            self.world.player.x as f32,
+            self.world.player.y as f32,
+        );
+        self.camera.update();
+
         Ok(())
     }
 
@@ -781,6 +793,31 @@ impl<'a> Game<'a> {
         Ok(())
     }
 
+    /// Transform a world-space rectangle to screen-space using camera
+    ///
+    /// Used for debug rendering of collision boxes. The collision detection
+    /// works in world space, but we need to transform to screen space for
+    /// visualization to align with the camera-transformed sprite rendering.
+    ///
+    /// # Arguments
+    /// * `world_rect` - Rectangle in world coordinates
+    ///
+    /// # Returns
+    /// Rectangle in screen coordinates (position transformed, size unchanged)
+    fn world_rect_to_screen(&self, world_rect: Rect) -> Rect {
+        let (screen_x, screen_y) = self.camera.world_to_screen(
+            world_rect.x(),
+            world_rect.y()
+        );
+
+        Rect::new(
+            screen_x,
+            screen_y,
+            world_rect.width(),
+            world_rect.height()
+        )
+    }
+
     /// Render the entire game scene
     /// Handles world rendering, UI, debug overlays, and presents to screen
     pub fn render(&mut self) -> Result<(), String> {
@@ -788,12 +825,12 @@ impl<'a> Game<'a> {
         self.canvas.set_draw_color(sdl2::pixels::Color::RGB(0, 0, 0));
         self.canvas.clear();
 
-        self.world.render_grid.render(&mut self.canvas, self.textures.grass_tile)?;
+        self.world.render_grid.render(&mut self.canvas, &self.camera, self.textures.grass_tile)?;
 
-        render_with_depth_sorting(&mut self.canvas, &self.world.player, &self.world.slimes, &self.systems.static_objects, &self.world.entities, &self.world.dropped_items)?;
+        render_with_depth_sorting(&mut self.canvas, &self.camera, &self.world.player, &self.world.slimes, &self.systems.static_objects, &self.world.entities, &self.world.dropped_items)?;
 
         for effect in &self.world.attack_effects {
-            effect.render(&mut self.canvas, SPRITE_SCALE)?;
+            effect.render(&mut self.canvas, &self.camera, SPRITE_SCALE)?;
         }
 
         if self.world.player.state.is_alive() {
@@ -854,12 +891,16 @@ impl<'a> Game<'a> {
             // RED: Environmental collision boxes (for push physics, walls)
             self.canvas.set_draw_color(sdl2::pixels::Color::RGBA(255, 0, 0, 128));
 
+            // Player collision box - transform to screen space
             let player_collision = self.world.player.get_bounds();
-            self.canvas.draw_rect(player_collision).map_err(|e| e.to_string())?;
+            let screen_player_collision = self.world_rect_to_screen(player_collision);
+            self.canvas.draw_rect(screen_player_collision).map_err(|e| e.to_string())?;
 
             for slime in &self.world.slimes {
+                // Slime collision box - transform to screen space
                 let slime_bounds = slime.get_bounds();
-                self.canvas.draw_rect(slime_bounds).map_err(|e| e.to_string())?;
+                let screen_slime_bounds = self.world_rect_to_screen(slime_bounds);
+                self.canvas.draw_rect(screen_slime_bounds).map_err(|e| e.to_string())?;
 
                 // YELLOW: Show where sprite SHOULD render (anchor visualization)
                 self.canvas.set_draw_color(sdl2::pixels::Color::RGBA(255, 255, 0, 200));
@@ -871,14 +912,17 @@ impl<'a> Game<'a> {
                     slime.width * SPRITE_SCALE,
                     slime.height * SPRITE_SCALE
                 );
-                self.canvas.draw_rect(sprite_rect).map_err(|e| e.to_string())?;
+                // Transform sprite rect to screen space
+                let screen_sprite_rect = self.world_rect_to_screen(sprite_rect);
+                self.canvas.draw_rect(screen_sprite_rect).map_err(|e| e.to_string())?;
 
-                // WHITE: Show anchor point
+                // WHITE: Show anchor point - transform to screen space
                 self.canvas.set_draw_color(sdl2::pixels::Color::RGBA(255, 255, 255, 255));
+                let (screen_anchor_x, screen_anchor_y) = self.camera.world_to_screen(slime.x, slime.y);
                 let anchor_size: u32 = 4;
                 let anchor_rect = Rect::new(
-                    slime.x - (anchor_size as i32) / 2,
-                    slime.y - (anchor_size as i32) / 2,
+                    screen_anchor_x - (anchor_size as i32) / 2,
+                    screen_anchor_y - (anchor_size as i32) / 2,
                     anchor_size,
                     anchor_size
                 );
@@ -888,22 +932,28 @@ impl<'a> Game<'a> {
                 self.canvas.set_draw_color(sdl2::pixels::Color::RGBA(255, 0, 0, 128));
             }
 
+            // Entity (pyramid) collision boxes - transform to screen space
             for entity in &self.world.entities {
                 let entity_bounds = entity.get_bounds();
-                self.canvas.draw_rect(entity_bounds).map_err(|e| e.to_string())?;
+                let screen_entity_bounds = self.world_rect_to_screen(entity_bounds);
+                self.canvas.draw_rect(screen_entity_bounds).map_err(|e| e.to_string())?;
             }
 
             // BLUE: Damage hitboxes (for getting hit by enemies)
             self.canvas.set_draw_color(sdl2::pixels::Color::RGBA(0, 100, 255, 128));
 
+            // Player damage box - transform to screen space
             let player_damage = self.world.player.get_damage_bounds();
-            self.canvas.draw_rect(player_damage).map_err(|e| e.to_string())?;
+            let screen_player_damage = self.world_rect_to_screen(player_damage);
+            self.canvas.draw_rect(screen_player_damage).map_err(|e| e.to_string())?;
 
             // GREEN: Attack hitboxes (for hitting enemies)
             if let Some(ref attack) = self.world.active_attack {
                 self.canvas.set_draw_color(sdl2::pixels::Color::RGBA(0, 255, 0, 128));
+                // Attack hitbox - transform to screen space
                 let attack_hitbox = attack.get_hitbox();
-                self.canvas.draw_rect(attack_hitbox).map_err(|e| e.to_string())?;
+                let screen_attack_hitbox = self.world_rect_to_screen(attack_hitbox);
+                self.canvas.draw_rect(screen_attack_hitbox).map_err(|e| e.to_string())?;
             }
         }
 
@@ -1147,12 +1197,21 @@ impl<'a> Game<'a> {
             items: item_textures,
         };
 
+        // Initialize camera centered on player
+        let camera = Camera::new(
+            world.player.x as f32,
+            world.player.y as f32,
+            GAME_WIDTH,
+            GAME_HEIGHT,
+        );
+
         // Assemble and return complete Game struct
         Ok(Game {
             world,
             systems,
             ui,
             game_state: GameState::Playing,
+            camera,
             canvas,
             event_pump,
             texture_creator,
@@ -1250,12 +1309,21 @@ impl<'a> Game<'a> {
             items: item_textures,
         };
 
+        // Initialize camera centered on loaded player position
+        let camera = Camera::new(
+            world.player.x as f32,
+            world.player.y as f32,
+            GAME_WIDTH,
+            GAME_HEIGHT,
+        );
+
         // Assemble and return complete Game struct
         Ok(Game {
             world,
             systems,
             ui,
             game_state: GameState::Playing,
+            camera,
             canvas,
             event_pump,
             texture_creator,

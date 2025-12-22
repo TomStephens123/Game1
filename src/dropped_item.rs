@@ -78,7 +78,7 @@ impl<'a> DroppedItem<'a> {
         false
     }
 
-    pub fn render(&self, canvas: &mut Canvas<Window>) -> Result<(), String> {
+    pub fn render(&self, canvas: &mut Canvas<Window>, camera: &crate::camera::Camera) -> Result<(), String> {
         let sprite_scale: u32 = if self.item_id == "slime_ball" || self.item_id == "stone" {
             1
         } else {
@@ -86,8 +86,12 @@ impl<'a> DroppedItem<'a> {
         };
         let scaled_width = self.width * sprite_scale;
         let scaled_height = self.height * sprite_scale;
-        let render_x = self.x - (scaled_width / 2) as i32;
-        let render_y = self.y - (scaled_height / 2) as i32 + self.render_y_offset;
+
+        // Transform world position to screen position using camera
+        let (screen_x, screen_y) = camera.world_to_screen(self.x, self.y);
+
+        let render_x = screen_x - (scaled_width / 2) as i32;
+        let render_y = screen_y - (scaled_height / 2) as i32 + self.render_y_offset;
         let dest_rect = Rect::new(render_x, render_y, scaled_width, scaled_height);
         if let Some(sprite_sheet) = self.animation_controller.get_current_sprite_sheet() {
             sprite_sheet.render_flipped(canvas, dest_rect, false)
@@ -134,8 +138,8 @@ impl DepthSortable for DroppedItem<'_> {
         self.y
     }
 
-    fn render(&self, canvas: &mut Canvas<Window>) -> Result<(), String> {
-        DroppedItem::render(self, canvas)
+    fn render(&self, canvas: &mut Canvas<Window>, camera: &crate::camera::Camera) -> Result<(), String> {
+        DroppedItem::render(self, canvas, camera)
     }
 }
 

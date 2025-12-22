@@ -154,15 +154,18 @@ impl<'a> Slime<'a> {
         // Animation controller already updated at the beginning of this function
     }
 
-    pub fn render(&self, canvas: &mut Canvas<Window>) -> Result<(), String> {
+    pub fn render(&self, canvas: &mut Canvas<Window>, camera: &crate::camera::Camera) -> Result<(), String> {
         const SPRITE_SCALE: u32 = 2;
         let scaled_width = self.width * SPRITE_SCALE;
         let scaled_height = self.height * SPRITE_SCALE;
 
-        // Calculate render position from anchor (bottom-center)
+        // Transform world position to screen position using camera
+        let (screen_x, screen_y) = camera.world_to_screen(self.x, self.y);
+
+        // Calculate render position from screen position (anchor at bottom-center)
         // self.y is base_y or modified by jump, both anchor-based
-        let render_x = self.x - (scaled_width / 2) as i32;
-        let render_y = self.y - scaled_height as i32;
+        let render_x = screen_x - (scaled_width / 2) as i32;
+        let render_y = screen_y - scaled_height as i32;
 
         let dest_rect = Rect::new(render_x, render_y, scaled_width, scaled_height);
 
@@ -250,10 +253,10 @@ impl DepthSortable for Slime<'_> {
         self.base_y
     }
 
-    fn render(&self, canvas: &mut Canvas<Window>) -> Result<(), String> {
+    fn render(&self, canvas: &mut Canvas<Window>, camera: &crate::camera::Camera) -> Result<(), String> {
         // Delegate to existing render implementation
         // This avoids code duplication and keeps the existing render logic intact
-        Slime::render(self, canvas)
+        Slime::render(self, canvas, camera)
     }
 }
 

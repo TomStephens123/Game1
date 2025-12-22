@@ -21,6 +21,7 @@
 /// ```
 ///
 /// See docs/systems/depth-sorting-render-system.md for detailed design documentation.
+use crate::camera::Camera;
 use crate::player::Player;
 use crate::slime::Slime;
 use crate::collision::StaticObject;
@@ -33,12 +34,15 @@ use sdl2::video::Window;
 ///
 /// Entities implement this trait to define:
 /// 1. Their depth (Y-coordinate for sorting)
-/// 2. How they render themselves
+/// 2. How they render themselves with camera transformation
 ///
 /// # Design Philosophy
 ///
 /// The depth is typically the Y-coordinate of the entity's anchor point (base/bottom).
 /// Entities with smaller Y-values render first (farther back in the scene).
+///
+/// The render method now takes a Camera reference to transform world coordinates
+/// to screen coordinates.
 pub trait DepthSortable {
     /// Get the Y-coordinate used for depth sorting.
     ///
@@ -46,10 +50,16 @@ pub trait DepthSortable {
     /// typically the bottom/base of the entity where it touches the ground.
     fn get_depth_y(&self) -> i32;
 
-    /// Render the entity to the canvas.
+    /// Render the entity to the canvas with camera transformation.
     ///
-    /// This method is responsible for drawing the entity at its current position.
-    fn render(&self, canvas: &mut Canvas<Window>) -> Result<(), String>;
+    /// This method is responsible for drawing the entity at its current position,
+    /// transformed from world coordinates to screen coordinates using the camera.
+    ///
+    /// # Arguments
+    ///
+    /// * `canvas` - The SDL2 canvas to render to
+    /// * `camera` - The camera for world-to-screen coordinate transformation
+    fn render(&self, canvas: &mut Canvas<Window>, camera: &Camera) -> Result<(), String>;
 }
 
 /// Wrapper enum for different renderable entity types.
@@ -87,16 +97,16 @@ impl<'a> Renderable<'a> {
     //         Renderable::TheEntity(e) => e.get_depth_y(),
     //     }
     // }
-    /// Render this entity to the canvas.
+    /// Render this entity to the canvas with camera transformation.
     ///
     /// Delegates to the underlying entity's `render()` implementation.
-    fn render(&self, canvas: &mut Canvas<Window>) -> Result<(), String> {
+    fn render(&self, canvas: &mut Canvas<Window>, camera: &Camera) -> Result<(), String> {
         match self {
-            Renderable::Player(p) => p.render(canvas),
-            Renderable::Slime(s) => s.render(canvas),
-            Renderable::StaticObject(obj) => obj.render(canvas),
-            Renderable::TheEntity(e) => e.render(canvas),
-            Renderable::DroppedItem(item) => item.render(canvas),
+            Renderable::Player(p) => p.render(canvas, camera),
+            Renderable::Slime(s) => s.render(canvas, camera),
+            Renderable::StaticObject(obj) => obj.render(canvas, camera),
+            Renderable::TheEntity(e) => e.render(canvas, camera),
+            Renderable::DroppedItem(item) => item.render(canvas, camera),
         }
     }
 }
@@ -130,6 +140,7 @@ impl<'a> Renderable<'a> {
 /// ```rust
 /// render_with_depth_sorting(
 ///     &mut canvas,
+///     &camera,
 ///     &player,
 ///     &slimes,
 ///     &static_objects,
@@ -137,6 +148,7 @@ impl<'a> Renderable<'a> {
 /// ```
 pub fn render_with_depth_sorting(
     canvas: &mut Canvas<Window>,
+    camera: &Camera,
     player: &Player,
     slimes: &[Slime],
     static_objects: &[StaticObject],
@@ -177,9 +189,9 @@ pub fn render_with_depth_sorting(
     // Rust Learning: sort_by_key() is a stable sort (maintains order of equal elements)
     renderables.sort_by_key(|(y, _)| *y);
 
-    // Render in sorted order (back to front)
+    // Render in sorted order (back to front) with camera transformation
     for (_, renderable) in renderables {
-        renderable.render(canvas)?;
+        renderable.render(canvas, camera)?;
     }
 
     Ok(())
