@@ -1009,7 +1009,7 @@ impl<'a> Game<'a> {
                 // Update player movement first (separate to avoid borrow issues)
                 {
                     let keyboard_state = self.event_pump.keyboard_state();
-                    self.world.player.update(&keyboard_state);
+                    self.world.player.update(&keyboard_state, self.delta_time);
                 }
 
                 // Now update the rest of the game world

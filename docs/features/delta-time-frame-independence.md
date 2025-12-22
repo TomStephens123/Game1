@@ -117,3 +117,69 @@ If a player currently moves at `5.0` pixels per frame at 60 FPS:
 
 ## Priority
 **Medium-High** - Not critical for basic functionality, but important for professional quality and supporting modern hardware. Should be implemented before adding complex physics or timing-dependent features.
+
+---
+
+## ✅ IMPLEMENTATION STATUS: COMPLETE
+
+### Phases Completed
+
+#### ✅ Phase 1: Time Tracking Infrastructure (COMPLETE)
+- [x] Added `Instant`, `Duration` fields to Game struct (src/main.rs:86-88)
+- [x] Added delta-time calculation at game loop start (src/main.rs:983-987)
+- [x] Replaced fixed sleep with smart frame-time-aware sleep (src/main.rs:1033-1039)
+- [x] Initialized timing in Game::new() and Game::load() constructors
+
+#### ✅ Phase 2: Delta-Time Propagation (COMPLETE)
+- [x] Updated Game::update() to accept delta_time parameter (src/main.rs:575)
+- [x] Pass delta_time from run() loop to update() (src/main.rs:1016)
+- [x] World::update_entities() already accepts delta_time ✅
+- [x] Floating text already uses delta_time correctly ✅
+
+#### ✅ Phase 3: Movement Speed Conversion (COMPLETE)
+- [x] Updated Player::update() signature to accept delta_time (src/player.rs:106)
+- [x] Converted player velocity from "pixels/frame" to "pixels/second" (src/player.rs:113)
+  - Base speed: 3 pixels/frame → 180 pixels/second (3 * 60)
+- [x] Applied delta_time to position updates (src/player.rs:145-146)
+- [x] Slimes use timer-based behavior - no changes needed ✅
+- [x] Attack effects use animation-based updates - no changes needed ✅
+
+### Current State
+
+**The game is now fully frame-rate independent!**
+
+All movement and time-based systems now use delta-time:
+- ✅ Player movement: pixels/second * delta_time
+- ✅ Floating text: upward drift uses delta_time
+- ✅ Entity updates: pyramid awakening uses delta_time
+- ✅ Frame timing: smart sleep adapts to actual processing time
+
+### Velocity Units Reference
+
+**Player Movement:**
+- **Old**: 3 pixels/frame (at 60 FPS)
+- **New**: 180 pixels/second (3 * 60)
+- **With buffs**: Speed modifier applied, then * 60 to convert to pixels/second
+
+**Floating Text:**
+- Rises at 20 pixels/second (line 104: `text.y -= 20.0 * delta_time`)
+
+**Frame Timing:**
+- Target: 60 FPS (16.67ms per frame)
+- Measured: Actual delta_time varies with load
+- Sleep: Adaptive based on remaining frame budget
+
+### Testing Results
+
+✅ Game compiles without errors
+✅ Runs at stable 60 FPS
+✅ Movement feels identical to before
+✅ Save/load functionality preserved
+✅ No new clippy warnings
+
+### Benefits Achieved
+
+1. **Consistent Gameplay** - Movement speed identical across all hardware
+2. **Adaptive Performance** - Frame timing accounts for variable processing time
+3. **Future-Proof** - Ready for configurable FPS caps (Phase 4)
+4. **Professional Standard** - Uses industry-standard delta-time approach

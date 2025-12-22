@@ -103,12 +103,15 @@ impl<'a> Player<'a> {
         self.animation_controller = controller;
     }
 
-    pub fn update(&mut self, keyboard_state: &sdl2::keyboard::KeyboardState) {
+    pub fn update(&mut self, keyboard_state: &sdl2::keyboard::KeyboardState, delta_time: f32) {
         self.velocity_x = 0;
         self.velocity_y = 0;
 
-        // Get effective movement speed from stats with modifiers applied
-        let effective_speed = self.stats.effective_stat(StatType::MovementSpeed, &self.active_modifiers) as i32;
+        // Get effective movement speed from stats with modifiers applied (pixels per second)
+        // Note: stats.movement_speed is stored as "pixels per frame at 60 FPS"
+        // Convert to pixels per second: speed * 60
+        let effective_speed_per_second = self.stats.effective_stat(StatType::MovementSpeed, &self.active_modifiers) * 60.0;
+        let effective_speed = effective_speed_per_second as i32;
 
         // Only allow movement if not attacking or taking damage
         if !self.is_attacking && !self.is_taking_damage {
@@ -137,8 +140,10 @@ impl<'a> Player<'a> {
             self.velocity_y = (self.velocity_y as f32 * diagonal_factor).round() as i32;
         }
 
-        self.x += self.velocity_x;
-        self.y += self.velocity_y;
+        // Apply velocity with delta_time for frame-rate independent movement
+        // velocity is in pixels/second, delta_time is in seconds
+        self.x += (self.velocity_x as f32 * delta_time).round() as i32;
+        self.y += (self.velocity_y as f32 * delta_time).round() as i32;
 
         // Update direction based on movement (only when moving)
         if self.velocity_x != 0 || self.velocity_y != 0 {
