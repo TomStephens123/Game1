@@ -42,7 +42,7 @@ use text::draw_simple_text;
 use the_entity::{TheEntity, EntityState, EntityType};
 use tile::{TileId, WorldGrid, RenderGrid};
 use ui::{HealthBar, HealthBarStyle, FloatingText, BuffDisplay};
-use std::time::{SystemTime, Instant};
+use std::time::{Duration, Instant, SystemTime};
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -81,6 +81,11 @@ pub struct Game<'a> {
 
     // Input handling
     pub input_system: input_system::InputSystem,
+
+    // Frame timing
+    last_frame_time: Instant,
+    target_frame_duration: Duration,
+    delta_time: f32,
 }
 
 impl<'a> Game<'a> {
@@ -572,9 +577,7 @@ impl<'a> Game<'a> {
     ///
     /// This method orchestrates all game logic updates in clear phases.
     /// Note: player movement is updated separately in run() to avoid borrow issues.
-    pub fn update(&mut self) -> Result<(), String> {
-        let delta_time = 1.0 / 60.0;
-
+    pub fn update(&mut self, delta_time: f32) -> Result<(), String> {
         // Phase 1: Combat resolution
         self.resolve_attacks()?;
 
@@ -977,6 +980,12 @@ impl<'a> Game<'a> {
     /// This is the entry point that orchestrates input, update, and render
     pub fn run(&mut self) -> Result<(), String> {
         'running: loop {
+            // TIMING: Calculate delta time since last frame
+            let current_time = Instant::now();
+            let frame_duration = current_time.duration_since(self.last_frame_time);
+            self.delta_time = frame_duration.as_secs_f32();
+            self.last_frame_time = current_time;
+
             // PHASE 1: Handle input events
             if self.handle_events()? {
                 break 'running; // Quit requested
@@ -1004,7 +1013,7 @@ impl<'a> Game<'a> {
                 }
 
                 // Now update the rest of the game world
-                self.update()?;
+                self.update(self.delta_time)?;
             }
 
             // Handle death screen respawn
@@ -1021,7 +1030,13 @@ impl<'a> Game<'a> {
             self.render()?;
 
             // PHASE 4: Frame rate limiting
-            std::thread::sleep(std::time::Duration::new(0, 1_000_000_000u32 / 60));
+            let frame_end_time = Instant::now();
+            let elapsed_this_frame = frame_end_time.duration_since(self.last_frame_time);
+
+            if elapsed_this_frame < self.target_frame_duration {
+                let sleep_duration = self.target_frame_duration - elapsed_this_frame;
+                std::thread::sleep(sleep_duration);
+            }
         }
 
         Ok(())
@@ -1145,6 +1160,11 @@ impl<'a> Game<'a> {
             item_registry: item_registry.clone(),
             save_manager,
             input_system: input_system::InputSystem::new(),
+
+            // Initialize frame timing for 60 FPS target
+            last_frame_time: Instant::now(),
+            target_frame_duration: Duration::from_nanos(1_000_000_000 / 60),
+            delta_time: 0.0,
         })
     }
 
@@ -1243,6 +1263,11 @@ impl<'a> Game<'a> {
             item_registry: item_registry.clone(),
             save_manager,
             input_system: input_system::InputSystem::new(),
+
+            // Initialize frame timing for 60 FPS target
+            last_frame_time: Instant::now(),
+            target_frame_duration: Duration::from_nanos(1_000_000_000 / 60),
+            delta_time: 0.0,
         })
     }
 
