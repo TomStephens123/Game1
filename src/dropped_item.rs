@@ -2,11 +2,15 @@ use crate::animation::AnimationController;
 use crate::collision::{Collidable, CollisionLayer};
 use crate::render::DepthSortable;
 use crate::save::{Saveable, SaveData, SaveError};
+use sdl2::gfx::primitives::DrawRenderer;
 use sdl2::rect::Rect;
 use sdl2::render::Canvas;
 use sdl2::video::Window;
 use serde::{Serialize, Deserialize};
 use std::time::Instant;
+
+// Visual scale for dropped items (smaller than full size to distinguish from placed blocks)
+const DROPPED_ITEM_VISUAL_SCALE: f32 = 0.75;
 
 #[derive(Serialize, Deserialize)]
 pub struct DroppedItemData {
@@ -66,7 +70,8 @@ impl<'a> DroppedItem<'a> {
     pub fn update(&mut self) -> bool {
         self.animation_controller.update();
         let elapsed = self.spawn_time.elapsed().as_secs_f32();
-        self.render_y_offset = (elapsed * 4.0).sin() as i32 * 3;
+        // Use (1.0 - cos) to start at bottom (0) and bob up to max amplitude
+        self.render_y_offset = ((1.0 - (elapsed * 5.0).cos()) * 1.5) as i32;
         if !self.can_pickup {
             if self.pickup_cooldown.elapsed().as_secs_f32() >= self.pickup_cooldown_duration {
                 self.can_pickup = true;
@@ -84,14 +89,32 @@ impl<'a> DroppedItem<'a> {
         } else {
             2
         };
-        let scaled_width = self.width * sprite_scale;
-        let scaled_height = self.height * sprite_scale;
+        let scaled_width = ((self.width * sprite_scale) as f32 * DROPPED_ITEM_VISUAL_SCALE) as u32;
+        let scaled_height = ((self.height * sprite_scale) as f32 * DROPPED_ITEM_VISUAL_SCALE) as u32;
 
         // Transform world position to screen position using camera
         let (screen_x, screen_y) = camera.world_to_screen(self.x, self.y);
 
+        // --- SHADOW RENDERING ---
+        let shadow_width = (scaled_width as f32 * 0.8) as i32;
+        let shadow_height = (shadow_width as f32 * 0.4) as i32;
+
+        // Offset shadow down by 4 pixels so item bobs above it (max bob is 3 pixels)
+        let shadow_y_offset = 4;
+
+        // Draw filled ellipse shadow (1 draw call)
+        canvas.filled_ellipse(
+            screen_x as i16,
+            (screen_y + shadow_y_offset) as i16,
+            (shadow_width / 2) as i16,
+            (shadow_height / 2) as i16,
+            sdl2::pixels::Color::RGBA(0, 0, 0, 128)
+        ).map_err(|e| e.to_string())?;
+        // --- END SHADOW ---
+
+        // Item rendering with bob offset (subtract to move UP when offset is positive)
         let render_x = screen_x - (scaled_width / 2) as i32;
-        let render_y = screen_y - (scaled_height / 2) as i32 + self.render_y_offset;
+        let render_y = screen_y - (scaled_height / 2) as i32 - self.render_y_offset;
         let dest_rect = Rect::new(render_x, render_y, scaled_width, scaled_height);
         if let Some(sprite_sheet) = self.animation_controller.get_current_sprite_sheet() {
             sprite_sheet.render_flipped(canvas, dest_rect, false)
