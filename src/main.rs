@@ -424,8 +424,10 @@ impl<'a> Game<'a> {
                         || self.game_state == GameState::ExitMenu;
 
                     if !is_ui_active {
-                        let tile_x = x / 32;
-                        let tile_y = y / 32;
+                        // Convert screen coordinates to world coordinates
+                        let (world_x, world_y) = self.camera.screen_to_world(x, y);
+                        let tile_x = world_x / 32;
+                        let tile_y = world_y / 32;
 
                         if self.ui.last_tilled_tile != Some((tile_x, tile_y)) {
                             if self.world.world_grid.get_tile(tile_x, tile_y) == Some(TileId::Grass) {
@@ -512,8 +514,11 @@ impl<'a> Game<'a> {
                         if let ItemProperties::Tool { tool_type: ToolType::Hoe, .. } = item_def.properties {
                             // Player has a hoe selected, start tilling
                             self.ui.is_tilling = true;
-                            let tile_x = x / 32;
-                            let tile_y = y / 32;
+
+                            // Convert screen coordinates to world coordinates
+                            let (world_x, world_y) = self.camera.screen_to_world(x, y);
+                            let tile_x = world_x / 32;
+                            let tile_y = world_y / 32;
 
                             // Only allow grass -> dirt conversion
                             if self.world.world_grid.get_tile(tile_x, tile_y) == Some(TileId::Grass) {
@@ -562,17 +567,20 @@ impl<'a> Game<'a> {
                 &["slime_idle", "jump", "slime_damage", "slime_death"],
             )?;
 
+            // Convert screen coordinates to world coordinates
+            let (world_x, world_y) = self.camera.screen_to_world(x, y);
+
             // Spawn slime so that click position = collision box center
             let temp_slime = Slime::new(0, 0, AnimationController::new());
-            let anchor_x = x - (temp_slime.hitbox_offset_x * SPRITE_SCALE as i32)
+            let anchor_x = world_x - (temp_slime.hitbox_offset_x * SPRITE_SCALE as i32)
                 - (temp_slime.hitbox_width * SPRITE_SCALE / 2) as i32;
-            let anchor_y = y - (temp_slime.hitbox_offset_y * SPRITE_SCALE as i32)
+            let anchor_y = world_y - (temp_slime.hitbox_offset_y * SPRITE_SCALE as i32)
                 - (temp_slime.hitbox_height * SPRITE_SCALE / 2) as i32;
 
             let mut new_slime = Slime::new(anchor_x, anchor_y, slime_animation_controller);
             new_slime.health = self.systems.debug_config.slime_base_health;
             self.world.slimes.push(new_slime);
-            println!("Spawned slime at ({}, {})", x, y);
+            println!("Spawned slime at world ({}, {}) from screen click ({}, {})", world_x, world_y, x, y);
         }
 
         Ok(())
