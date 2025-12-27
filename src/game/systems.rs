@@ -9,10 +9,6 @@ use std::time::Instant;
 
 use super::DebugConfig;
 
-// Constants from main.rs
-const GAME_WIDTH: u32 = 640;
-const GAME_HEIGHT: u32 = 360;
-
 /// Systems holds configuration data and helper systems
 /// This struct contains things that configure gameplay but aren't entities
 pub struct Systems {
@@ -33,13 +29,8 @@ impl Systems {
         slime_config: AnimationConfig,
         punch_config: AnimationConfig,
     ) -> Self {
-        let boundary_thickness = 10;
-        let static_objects = vec![
-            StaticObject::new(0, -(boundary_thickness as i32), GAME_WIDTH, boundary_thickness),
-            StaticObject::new(-(boundary_thickness as i32), 0, boundary_thickness, GAME_HEIGHT),
-            StaticObject::new(GAME_WIDTH as i32, 0, boundary_thickness, GAME_HEIGHT),
-            StaticObject::new(0, GAME_HEIGHT as i32, GAME_WIDTH, boundary_thickness),
-        ];
+        // No boundary walls - player can move freely into the larger world
+        let static_objects = vec![];
 
         Systems {
             player_config,

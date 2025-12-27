@@ -836,13 +836,16 @@ impl<'a> Game<'a> {
         if self.world.player.state.is_alive() {
             // Health bar expects top-left coordinates, but player uses anchor (bottom-center)
             // Calculate top-left from anchor for health bar rendering
-            let player_top_left_x = self.world.player.x - ((self.world.player.width * SPRITE_SCALE) / 2) as i32;
-            let player_top_left_y = self.world.player.y - (self.world.player.height * SPRITE_SCALE) as i32;
+            let player_world_x = self.world.player.x - ((self.world.player.width * SPRITE_SCALE) / 2) as i32;
+            let player_world_y = self.world.player.y - (self.world.player.height * SPRITE_SCALE) as i32;
+
+            // Transform world coordinates to screen coordinates using camera
+            let (player_screen_x, player_screen_y) = self.camera.world_to_screen(player_world_x, player_world_y);
 
             self.ui.player_health_bar.render(
                 &mut self.canvas,
-                player_top_left_x,
-                player_top_left_y,
+                player_screen_x,
+                player_screen_y,
                 self.world.player.width * SPRITE_SCALE,
                 self.world.player.height * SPRITE_SCALE,
                 self.world.player.stats.health.percentage(),
@@ -853,13 +856,16 @@ impl<'a> Game<'a> {
             if slime.is_alive {
                 // Health bar expects top-left coordinates, but slime uses anchor (bottom-center)
                 // Calculate top-left from anchor for health bar rendering
-                let slime_top_left_x = slime.x - ((slime.width * SPRITE_SCALE) / 2) as i32;
-                let slime_top_left_y = slime.y - (slime.height * SPRITE_SCALE) as i32;
+                let slime_world_x = slime.x - ((slime.width * SPRITE_SCALE) / 2) as i32;
+                let slime_world_y = slime.y - (slime.height * SPRITE_SCALE) as i32;
+
+                // Transform world coordinates to screen coordinates using camera
+                let (slime_screen_x, slime_screen_y) = self.camera.world_to_screen(slime_world_x, slime_world_y);
 
                 self.ui.enemy_health_bar.render(
                     &mut self.canvas,
-                    slime_top_left_x,
-                    slime_top_left_y,
+                    slime_screen_x,
+                    slime_screen_y,
                     slime.width * SPRITE_SCALE,
                     slime.height * SPRITE_SCALE,
                     slime.health as f32 / 8.0, // Slimes have max 8 HP
@@ -869,10 +875,14 @@ impl<'a> Game<'a> {
 
         for text in &self.world.floating_texts {
             let alpha = ((1.0 - text.lifetime / text.max_lifetime) * 255.0) as u8;
+
+            // Transform world coordinates to screen coordinates using camera
+            let (screen_x, screen_y) = self.camera.world_to_screen(text.x as i32, text.y as i32);
+
             self.ui.floating_text_renderer.render(
                 &mut self.canvas,
-                text.x as i32,
-                text.y as i32,
+                screen_x,
+                screen_y,
                 &text.text,
                 text.color,
                 alpha,

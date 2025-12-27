@@ -1,6 +1,6 @@
 # Camera and Viewport System
 
-**Status**: 📋 PLANNED
+**Status**: ✅ IMPLEMENTED (Camera following complete, UI alignment fixed 2025-12-27)
 
 ## Overview
 
@@ -1097,17 +1097,60 @@ entity.render(canvas)?;
 entity.render(canvas, camera)?;
 ```
 
-**❌ Pitfall 2: Applying Camera to UI**
-```rust
-// WRONG - UI moves with camera!
-let (screen_x, screen_y) = camera.world_to_screen(ui.x, ui.y);
+**❌ Pitfall 2: Confusing Screen-Space and World-Space UI**
 
-// CORRECT - UI at fixed screen position
-let screen_x = ui.x;
-let screen_y = ui.y;
+There are TWO types of UI - know which one you're building:
+
+```rust
+// SCREEN-SPACE UI - Fixed position on screen (inventory, menus, HUD)
+// WRONG - Applying camera transform to screen-space UI
+let (screen_x, screen_y) = camera.world_to_screen(menu.x, menu.y);
+
+// CORRECT - Screen-space UI uses direct screen coordinates
+canvas.fill_rect(Rect::new(menu.x, menu.y, menu.width, menu.height))?;
 ```
 
-**❌ Pitfall 3: Using Player Position for World Bounds**
+```rust
+// WORLD-SPACE UI - Follows entities in the world (health bars, floating text)
+// WRONG - Forgetting camera transform for world-space UI
+canvas.fill_rect(Rect::new(entity.x, entity.y, width, height))?;  // Will be misaligned!
+
+// CORRECT - World-space UI needs camera transform
+let (screen_x, screen_y) = camera.world_to_screen(entity.x, entity.y);
+canvas.fill_rect(Rect::new(screen_x, screen_y, width, height))?;
+```
+
+**Decision Tree**: Does this UI element follow something in the world?
+- **YES** (health bars, damage numbers, entity labels) → Use `camera.world_to_screen()`
+- **NO** (menus, HUD, debug overlays) → Use direct screen coordinates
+
+**❌ Pitfall 3: Forgetting Camera Transform in Rendering Loop**
+
+**Real Bug Example** (Fixed 2025-12-27): Health bars and floating text were misaligned after implementing camera following because the render loop forgot to transform coordinates.
+
+```rust
+// WRONG - Health bars appear in wrong location when camera moves
+for text in &floating_texts {
+    renderer.render(canvas, text.x as i32, text.y as i32, &text.text)?;
+    // Bug: text.x and text.y are world coordinates, but renderer expects screen coordinates!
+}
+
+// CORRECT - Transform world coordinates before rendering
+for text in &floating_texts {
+    let (screen_x, screen_y) = camera.world_to_screen(text.x as i32, text.y as i32);
+    renderer.render(canvas, screen_x, screen_y, &text.text)?;
+}
+```
+
+**Checklist for World-Space UI**:
+- [ ] Calculate world position (entity.x, entity.y)
+- [ ] Call `camera.world_to_screen(world_x, world_y)`
+- [ ] Pass screen coordinates to renderer
+- [ ] Test by moving player around world - UI should follow entity
+
+See `src/main.rs` lines 836-890 for the correct implementation.
+
+**❌ Pitfall 4: Using Player Position for World Bounds**
 ```rust
 // WRONG - Player can't reach world edges
 if player.x < WORLD_WIDTH { ... }
@@ -1116,7 +1159,7 @@ if player.x < WORLD_WIDTH { ... }
 if player.x <= WORLD_WIDTH { ... }
 ```
 
-**❌ Pitfall 4: Not Culling Tiles**
+**❌ Pitfall 5: Not Culling Tiles**
 ```rust
 // WRONG - Renders entire world every frame (kills performance)
 for y in 0..world.height {
