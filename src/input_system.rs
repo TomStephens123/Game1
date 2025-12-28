@@ -34,7 +34,6 @@ pub enum GameAction {
 
     // === Debug Commands ===
     SaveGame,
-    LoadGame,
     ToggleCollisionBoxes,
     ToggleGridOverlay,
     TogglePause,
@@ -231,7 +230,6 @@ impl InputSystem {
 
             // Debug commands
             Keycode::F5 => actions.push(GameAction::SaveGame),
-            Keycode::F9 => actions.push(GameAction::LoadGame),
             Keycode::B => actions.push(GameAction::ToggleCollisionBoxes),
             Keycode::G => actions.push(GameAction::ToggleGridOverlay),
             Keycode::P => actions.push(GameAction::TogglePause),

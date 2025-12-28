@@ -346,41 +346,6 @@ impl<'a> Game<'a> {
                 }
             }
 
-            GameAction::LoadGame => {
-                match load_game(
-                    &self.save_manager,
-                    &self.systems.player_config,
-                    &self.systems.slime_config,
-                    self.textures.character,
-                    self.textures.slime,
-                    self.textures.entity,
-                    self.textures.items,
-                ) {
-                    Ok((
-                        loaded_player,
-                        loaded_slimes,
-                        loaded_world,
-                        loaded_entities,
-                        loaded_inventory,
-                        loaded_items,
-                    )) => {
-                        self.world.player = loaded_player;
-                        self.world.slimes = loaded_slimes;
-                        self.world.world_grid = loaded_world;
-                        self.world.render_grid = RenderGrid::new(&self.world.world_grid);
-                        self.world.entities = loaded_entities;
-                        self.world.player_inventory = loaded_inventory;
-                        self.world.dropped_items = loaded_items;
-                        self.world.attack_effects.clear();
-                        self.world.active_attack = None;
-                        println!("✓ Game loaded successfully!");
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to load: {}", e);
-                    }
-                }
-            }
-
             GameAction::ToggleCollisionBoxes => {
                 self.ui.show_collision_boxes = !self.ui.show_collision_boxes;
                 println!(
@@ -1303,9 +1268,9 @@ impl<'a> Game<'a> {
         item_registry: &'a ItemRegistry,
         save_manager: SaveManager,
     ) -> Result<Self, String> {
-        // Try to load game data from save file
+        // Try to load game data from save file (slot 1 by default)
         let (player, slimes, world_grid, entities, player_inventory, dropped_items) =
-            Self::load_game_data(&save_manager, &player_config, &slime_config, character_texture, slime_texture, entity_texture, item_textures)?;
+            Self::load_game_data(&save_manager, 1, &player_config, &slime_config, character_texture, slime_texture, entity_texture, item_textures)?;
 
         // Create render grid from loaded world
         let render_grid = RenderGrid::new(&world_grid);
@@ -1401,6 +1366,7 @@ impl<'a> Game<'a> {
     /// Returns all game entities loaded from the save file
     fn load_game_data(
         save_manager: &SaveManager,
+        slot: u8,
         player_config: &AnimationConfig,
         slime_config: &AnimationConfig,
         character_texture: &'a sdl2::render::Texture<'a>,
@@ -1408,8 +1374,8 @@ impl<'a> Game<'a> {
         entity_texture: &'a sdl2::render::Texture<'a>,
         item_textures: &'a HashMap<String, sdl2::render::Texture<'a>>,
     ) -> Result<(Player<'a>, Vec<Slime<'a>>, WorldGrid, Vec<TheEntity<'a>>, PlayerInventory, Vec<DroppedItem<'a>>), String> {
-        // Load save file from slot 1
-        let save_file = save_manager.load_game(1)
+        // Load save file from specified slot
+        let save_file = save_manager.load_game(slot)
             .map_err(|e| format!("Failed to load save: {}", e))?;
 
         println!("Loading game...");
@@ -1547,18 +1513,6 @@ fn load_texture<'a>(
         .map_err(|e| format!("Failed to load {}: {}", path, e))
 }
 
-// REMOVED: Old repetitive setup functions replaced with AnimationConfig::create_controller()!
-//
-// Game Dev Pattern: Don't Repeat Yourself (DRY)
-// The old code had 50+ lines of boilerplate that's now replaced by single-line calls:
-//   config.create_controller(texture, &["idle", "running", "attack"])?
-//
-// Benefits:
-// - Less code = fewer bugs
-// - Easier to add new entities (no new function needed)
-// - Configuration-driven (JSON defines what exists)
-// - Factory pattern encapsulates complexity
-
 /// Calculate the best window scale based on monitor size
 fn calculate_window_scale(video_subsystem: &sdl2::VideoSubsystem) -> u32 {
     match video_subsystem.desktop_display_mode(0) {
@@ -1584,140 +1538,6 @@ fn calculate_window_scale(video_subsystem: &sdl2::VideoSubsystem) -> u32 {
     }
 }
 
-/// Load game state from save file
-fn load_game<'a>(
-    save_manager: &SaveManager,
-    player_config: &AnimationConfig,
-    slime_config: &AnimationConfig,
-    character_texture: &'a sdl2::render::Texture<'a>,
-    slime_texture: &'a sdl2::render::Texture<'a>,
-    entity_texture: &'a sdl2::render::Texture<'a>,
-    item_textures: &'a HashMap<String, sdl2::render::Texture<'a>>,
-) -> Result<(Player<'a>, Vec<Slime<'a>>, WorldGrid, Vec<TheEntity<'a>>, PlayerInventory, Vec<DroppedItem<'a>>), String> {
-    // Load save file from slot 1
-    let save_file = save_manager.load_game(1)
-        .map_err(|e| format!("Failed to load save: {}", e))?;
-
-    println!("Loading game...");
-    println!("  - Save version: {}", save_file.version);
-    println!("  - Saved: {:?}", save_file.timestamp);
-
-    // Load world
-    let world_grid = WorldGrid::from_save_data(
-        save_file.world_state.width,
-        save_file.world_state.height,
-        save_file.world_state.tiles,
-    ).ok_or_else(|| "Failed to load world grid".to_string())?;
-
-    println!("  - Loaded world: {}x{} tiles", world_grid.width, world_grid.height);
-
-    // Load entities
-    let mut player: Option<Player> = None;
-    let mut slimes: Vec<Slime> = Vec::new();
-    let mut loaded_entities: Vec<TheEntity> = Vec::new();
-    let mut player_inventory = PlayerInventory::new();
-    let mut dropped_items = Vec::new();
-
-    for entity_data in save_file.entities {
-        match entity_data.entity_type.as_str() {
-            "player" => {
-                let save_data = SaveData {
-                    data_type: "player".to_string(),
-                    json_data: entity_data.data,
-                };
-
-                let mut loaded_player = Player::from_save_data(&save_data)
-                    .map_err(|e| format!("Failed to load player: {}", e))?;
-
-                let animation_controller = player_config.create_controller(
-                    character_texture,
-                    &["idle", "running", "attack", "damage", "death"],
-                ).map_err(|e| format!("Failed to create player animations: {}", e))?;
-
-                loaded_player.set_animation_controller(animation_controller);
-                player = Some(loaded_player);
-                println!("  - Loaded player at ({}, {})", entity_data.position.0, entity_data.position.1);
-            }
-            "slime" => {
-                let save_data = SaveData {
-                    data_type: "slime".to_string(),
-                    json_data: entity_data.data,
-                };
-
-                let mut loaded_slime = Slime::from_save_data(&save_data)
-                    .map_err(|e| format!("Failed to load slime: {}", e))?;
-
-                let slime_animation_controller = slime_config.create_controller(
-                    slime_texture,
-                    &["slime_idle", "jump", "slime_damage", "slime_death"],
-                ).map_err(|e| format!("Failed to create slime animations: {}", e))?;
-
-                loaded_slime.set_animation_controller(slime_animation_controller);
-                slimes.push(loaded_slime);
-            }
-            "the_entity" => {
-                #[derive(Deserialize)]
-                struct EntitySaveData {
-                    id: usize,
-                    x: i32,
-                    y: i32,
-                    state: EntityState,
-                    awakening_frame: usize,
-                    inactivity_timer: f32,
-                    entity_type: EntityType,
-                }
-
-                let saved_entity: EntitySaveData = serde_json::from_str(&entity_data.data)
-                    .map_err(|e| format!("Failed to deserialize entity: {}", e))?;
-
-                let mut frames = Vec::new();
-                for i in 0..13 {
-                    frames.push(sprite::Frame::new(i * 32, 0, 32, 32, 100));
-                }
-                let sprite_sheet = sprite::SpriteSheet::new(entity_texture, frames);
-
-                let mut loaded_entity = TheEntity::new(saved_entity.id, saved_entity.x, saved_entity.y, saved_entity.entity_type, sprite_sheet);
-                loaded_entity.state = saved_entity.state;
-                loaded_entity.awakening_frame = saved_entity.awakening_frame;
-                loaded_entity.inactivity_timer = saved_entity.inactivity_timer;
-
-                loaded_entity.update_sprite_frame();
-
-                loaded_entities.push(loaded_entity);
-            }
-            "player_inventory" => {
-                player_inventory = serde_json::from_str(&entity_data.data).map_err(|e| format!("Failed to load player inventory: {}", e))?;
-            }
-            "dropped_item" => {
-                let save_data = SaveData {
-                    data_type: "dropped_item".to_string(),
-                    json_data: entity_data.data,
-                };
-                let mut item = DroppedItem::from_save_data(&save_data).map_err(|e| e.to_string())?;
-                let mut item_animation_controller = animation::AnimationController::new();
-                let item_frames = vec![
-                    sprite::Frame::new(0, 0, 32, 32, 300),
-                ];
-                let item_texture = item_textures.get(&item.item_id).ok_or(format!("Missing texture for item {}", item.item_id))?;
-                let item_sprite_sheet = SpriteSheet::new(item_texture, item_frames);
-                item_animation_controller.add_animation("item_idle".to_string(), item_sprite_sheet);
-                item_animation_controller.set_state("item_idle".to_string());
-                item.set_animation_controller(item_animation_controller);
-                dropped_items.push(item);
-            }
-            unknown => {
-                eprintln!("Warning: Unknown entity type '{}', skipping", unknown);
-            }
-        }
-    }
-
-    let player = player.ok_or_else(|| "No player found in save file".to_string())?;
-    println!("  - Loaded {} slimes", slimes.len());
-    println!("  - Loaded {} entities", loaded_entities.len());
-    println!("✓ Game loaded successfully!");
-
-    Ok((player, slimes, world_grid, loaded_entities, player_inventory, dropped_items))
-}
 
 /// Save the current game state
 fn save_game(
@@ -2047,10 +1867,9 @@ fn main() -> Result<(), String> {
     println!("- 1 second invulnerability after taking damage");
 
     // Try loading existing save, otherwise create new game
-    let mut game = match load_game(&save_manager, &player_config, &slime_config, &character_texture, &slime_texture, &entity_texture, &item_textures) {
-        Ok(_) => {
-            println!("✓ Loaded existing save!");
-            Game::load(
+    let mut game = if save_manager.save_exists(1) {
+        println!("✓ Loaded existing save!");
+        Game::load(
                 &texture_creator,
                 canvas,
                 event_pump,
@@ -2066,10 +1885,9 @@ fn main() -> Result<(), String> {
                 &item_registry,
                 save_manager,
             )?
-        }
-        Err(_) => {
-            println!("No existing save found, starting new game");
-            Game::new(
+    } else {
+        println!("No existing save found, starting new game");
+        Game::new(
                 &texture_creator,
                 canvas,
                 event_pump,
@@ -2085,7 +1903,6 @@ fn main() -> Result<(), String> {
                 &item_registry,
                 save_manager,
             )?
-        }
     };
 
     // Run the game!
