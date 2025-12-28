@@ -559,9 +559,11 @@ impl<'a> Game<'a> {
         }
 
         // Debug feature: spawn slime on right-click (only if not over inventory)
-        if self.game_state == GameState::Playing
-            && !matches!(self.ui.debug_menu_state, DebugMenuState::Open { .. })
-        {
+        let is_ui_active = self.ui.inventory_ui.is_open
+            || matches!(self.ui.debug_menu_state, DebugMenuState::Open { .. })
+            || self.game_state == GameState::ExitMenu;
+
+        if self.game_state == GameState::Playing && !is_ui_active {
             let slime_animation_controller = self.systems.slime_config.create_controller(
                 self.textures.slime,
                 &["slime_idle", "jump", "slime_damage", "slime_death"],
