@@ -131,6 +131,21 @@ impl<'a> Game<'a> {
     fn handle_action(&mut self, action: input_system::GameAction) -> Result<bool, String> {
         use input_system::GameAction;
 
+        // Block world-only actions when UI is active
+        // This prevents combat and world modification when UI overlays are blocking the view
+        if self.input_system.is_ui_active() {
+            match action {
+                // Block these world-only actions when UI is active
+                GameAction::Attack
+                | GameAction::SpawnSlime(_, _)
+                | GameAction::UseHoe(_, _) => {
+                    return Ok(false); // Silently ignore - can't interact with world through UI
+                }
+                // Allow all other actions (UI navigation, inventory, mouse events, debug commands, etc.)
+                _ => {}
+            }
+        }
+
         match action {
             // === System ===
             GameAction::Quit => {
@@ -416,21 +431,18 @@ impl<'a> Game<'a> {
                 self.ui.mouse_y = y;
 
                 // Handle tilling while dragging with hoe equipped
-                if self.ui.is_tilling && self.game_state == GameState::Playing {
-                    let is_ui_active = self.input_system.is_ui_active();
+                // Only till if UI is not active (player could open inventory mid-tilling)
+                if self.ui.is_tilling && self.game_state == GameState::Playing && !self.input_system.is_ui_active() {
+                    // Convert screen coordinates to world coordinates
+                    let (world_x, world_y) = self.camera.screen_to_world(x, y);
+                    let tile_x = world_x / 32;
+                    let tile_y = world_y / 32;
 
-                    if !is_ui_active {
-                        // Convert screen coordinates to world coordinates
-                        let (world_x, world_y) = self.camera.screen_to_world(x, y);
-                        let tile_x = world_x / 32;
-                        let tile_y = world_y / 32;
-
-                        if self.ui.last_tilled_tile != Some((tile_x, tile_y)) {
-                            if self.world.world_grid.get_tile(tile_x, tile_y) == Some(TileId::Grass) {
-                                if self.world.world_grid.set_tile(tile_x, tile_y, TileId::Dirt) {
-                                    self.world.render_grid.update_tile_and_neighbors(&self.world.world_grid, tile_x, tile_y);
-                                    self.ui.last_tilled_tile = Some((tile_x, tile_y));
-                                }
+                    if self.ui.last_tilled_tile != Some((tile_x, tile_y)) {
+                        if self.world.world_grid.get_tile(tile_x, tile_y) == Some(TileId::Grass) {
+                            if self.world.world_grid.set_tile(tile_x, tile_y, TileId::Dirt) {
+                                self.world.render_grid.update_tile_and_neighbors(&self.world.world_grid, tile_x, tile_y);
+                                self.ui.last_tilled_tile = Some((tile_x, tile_y));
                             }
                         }
                     }
@@ -499,27 +511,24 @@ impl<'a> Game<'a> {
                 sdl2::mouse::MouseButton::Left,
             )?;
 
-            // Check if player has a hoe selected and is clicking in the world (not UI)
-            let is_ui_active = self.input_system.is_ui_active();
+            // Check if player has a hoe selected for tilling
+            // (UI blocking is already handled by early return in handle_action)
+            if let Some(selected_item) = self.world.player_inventory.get_selected_hotbar() {
+                if let Some(item_def) = self.item_registry.get(&selected_item.item_id) {
+                    if let ItemProperties::Tool { tool_type: ToolType::Hoe, .. } = item_def.properties {
+                        // Player has a hoe selected, start tilling
+                        self.ui.is_tilling = true;
 
-            if !is_ui_active {
-                if let Some(selected_item) = self.world.player_inventory.get_selected_hotbar() {
-                    if let Some(item_def) = self.item_registry.get(&selected_item.item_id) {
-                        if let ItemProperties::Tool { tool_type: ToolType::Hoe, .. } = item_def.properties {
-                            // Player has a hoe selected, start tilling
-                            self.ui.is_tilling = true;
+                        // Convert screen coordinates to world coordinates
+                        let (world_x, world_y) = self.camera.screen_to_world(x, y);
+                        let tile_x = world_x / 32;
+                        let tile_y = world_y / 32;
 
-                            // Convert screen coordinates to world coordinates
-                            let (world_x, world_y) = self.camera.screen_to_world(x, y);
-                            let tile_x = world_x / 32;
-                            let tile_y = world_y / 32;
-
-                            // Only allow grass -> dirt conversion
-                            if self.world.world_grid.get_tile(tile_x, tile_y) == Some(TileId::Grass) {
-                                if self.world.world_grid.set_tile(tile_x, tile_y, TileId::Dirt) {
-                                    self.world.render_grid.update_tile_and_neighbors(&self.world.world_grid, tile_x, tile_y);
-                                    self.ui.last_tilled_tile = Some((tile_x, tile_y));
-                                }
+                        // Only allow grass -> dirt conversion
+                        if self.world.world_grid.get_tile(tile_x, tile_y) == Some(TileId::Grass) {
+                            if self.world.world_grid.set_tile(tile_x, tile_y, TileId::Dirt) {
+                                self.world.render_grid.update_tile_and_neighbors(&self.world.world_grid, tile_x, tile_y);
+                                self.ui.last_tilled_tile = Some((tile_x, tile_y));
                             }
                         }
                     }
@@ -593,10 +602,9 @@ impl<'a> Game<'a> {
             }
         }
 
-        // Debug feature: spawn slime on right-click (only if not over inventory)
-        let is_ui_active = self.input_system.is_ui_active();
-
-        if self.game_state == GameState::Playing && !is_ui_active {
+        // Debug feature: spawn slime on right-click in world
+        // (UI blocking is already handled by early return in handle_action)
+        if self.game_state == GameState::Playing {
             let slime_animation_controller = self.systems.slime_config.create_controller(
                 self.textures.slime,
                 &["slime_idle", "jump", "slime_damage", "slime_death"],
