@@ -79,8 +79,6 @@ pub struct UIState {
     pub debug_menu_open: bool,
     pub exit_menu_open: bool,
     pub death_screen_active: bool,
-    pub game_state_dead: bool,
-    pub game_state_exit_menu: bool,
 }
 
 /// InputSystem processes SDL2 events and produces GameActions
@@ -110,6 +108,28 @@ impl InputSystem {
         }
     }
 
+    /// Returns true if any UI that blocks world interaction is active
+    ///
+    /// This provides a single source of truth for whether the player
+    /// should be able to interact with the game world. Any UI state
+    /// that overlays the game view should block world interactions.
+    pub fn is_ui_active(&self) -> bool {
+        matches!(
+            self.context,
+            InputContext::Inventory
+                | InputContext::ExitMenu
+                | InputContext::DebugMenu
+                | InputContext::DeathScreen
+        )
+    }
+
+    /// Returns true if world interactions should be blocked
+    ///
+    /// Alias for is_ui_active() with more explicit intent.
+    pub fn should_block_world_input(&self) -> bool {
+        self.is_ui_active()
+    }
+
     /// Update the input context based on current game/UI state
     ///
     /// This should be called before poll_events() to ensure correct
@@ -122,9 +142,9 @@ impl InputSystem {
     /// 4. DebugMenu - F3 debug overlay
     /// 5. Playing - normal gameplay
     pub fn update_context(&mut self, ui_state: &UIState) {
-        self.context = if ui_state.death_screen_active || ui_state.game_state_dead {
+        self.context = if ui_state.death_screen_active {
             InputContext::DeathScreen
-        } else if ui_state.exit_menu_open || ui_state.game_state_exit_menu {
+        } else if ui_state.exit_menu_open {
             InputContext::ExitMenu
         } else if ui_state.inventory_open {
             InputContext::Inventory
@@ -380,8 +400,6 @@ mod tests {
             debug_menu_open: false,
             exit_menu_open: false,
             death_screen_active: false,
-            game_state_dead: false,
-            game_state_exit_menu: false,
         };
         input.update_context(&ui_state);
         assert_eq!(input.context, InputContext::Inventory);
@@ -392,8 +410,6 @@ mod tests {
             debug_menu_open: true,
             exit_menu_open: false,
             death_screen_active: false,
-            game_state_dead: false,
-            game_state_exit_menu: false,
         };
         input.update_context(&ui_state);
         assert_eq!(input.context, InputContext::DebugMenu);
@@ -408,9 +424,7 @@ mod tests {
             inventory_open: true,
             debug_menu_open: true,
             exit_menu_open: true,
-            death_screen_active: false,
-            game_state_dead: true,
-            game_state_exit_menu: false,
+            death_screen_active: true,
         };
         input.update_context(&ui_state);
         assert_eq!(input.context, InputContext::DeathScreen);
@@ -421,8 +435,6 @@ mod tests {
             debug_menu_open: true,
             exit_menu_open: true,
             death_screen_active: false,
-            game_state_dead: false,
-            game_state_exit_menu: true,
         };
         input.update_context(&ui_state);
         assert_eq!(input.context, InputContext::ExitMenu);

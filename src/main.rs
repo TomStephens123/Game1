@@ -101,8 +101,6 @@ impl<'a> Game<'a> {
             debug_menu_open: matches!(self.ui.debug_menu_state, DebugMenuState::Open { .. }),
             exit_menu_open: self.game_state == GameState::ExitMenu,
             death_screen_active: self.game_state == GameState::Dead,
-            game_state_dead: self.game_state == GameState::Dead,
-            game_state_exit_menu: self.game_state == GameState::ExitMenu,
         };
 
         // Update input context based on UI state
@@ -419,9 +417,7 @@ impl<'a> Game<'a> {
 
                 // Handle tilling while dragging with hoe equipped
                 if self.ui.is_tilling && self.game_state == GameState::Playing {
-                    let is_ui_active = self.ui.inventory_ui.is_open
-                        || matches!(self.ui.debug_menu_state, DebugMenuState::Open { .. })
-                        || self.game_state == GameState::ExitMenu;
+                    let is_ui_active = self.input_system.is_ui_active();
 
                     if !is_ui_active {
                         // Convert screen coordinates to world coordinates
@@ -504,9 +500,7 @@ impl<'a> Game<'a> {
             )?;
 
             // Check if player has a hoe selected and is clicking in the world (not UI)
-            let is_ui_active = self.ui.inventory_ui.is_open
-                || matches!(self.ui.debug_menu_state, DebugMenuState::Open { .. })
-                || self.game_state == GameState::ExitMenu;
+            let is_ui_active = self.input_system.is_ui_active();
 
             if !is_ui_active {
                 if let Some(selected_item) = self.world.player_inventory.get_selected_hotbar() {
@@ -600,9 +594,7 @@ impl<'a> Game<'a> {
         }
 
         // Debug feature: spawn slime on right-click (only if not over inventory)
-        let is_ui_active = self.ui.inventory_ui.is_open
-            || matches!(self.ui.debug_menu_state, DebugMenuState::Open { .. })
-            || self.game_state == GameState::ExitMenu;
+        let is_ui_active = self.input_system.is_ui_active();
 
         if self.game_state == GameState::Playing && !is_ui_active {
             let slime_animation_controller = self.systems.slime_config.create_controller(
@@ -1103,10 +1095,7 @@ impl<'a> Game<'a> {
             }
 
             // Check if UI is blocking gameplay
-            let is_ui_active = self.ui.inventory_ui.is_open ||
-                               matches!(self.ui.debug_menu_state, DebugMenuState::Open { .. }) ||
-                               self.game_state == GameState::ExitMenu ||
-                               self.game_state == GameState::Dead;
+            let is_ui_active = self.input_system.is_ui_active();
 
             // PHASE 2: Update game state
             if self.game_state == GameState::Playing && !is_ui_active {
