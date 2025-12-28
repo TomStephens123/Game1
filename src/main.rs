@@ -24,7 +24,7 @@ mod the_entity;
 mod tile;
 mod ui;
 
-use animation::{AnimationConfig, AnimationController};
+use animation::{AnimationConfig, AnimationController, Direction};
 use camera::Camera;
 use collision::{
     calculate_overlap, check_collisions_with_collection, check_static_collisions, Collidable,
@@ -554,6 +554,47 @@ impl<'a> Game<'a> {
                     false, // shift not relevant for right-click
                     sdl2::mouse::MouseButton::Right,
                 )?;
+                return Ok(());
+            }
+
+            // If player is holding an item and clicks outside inventory, throw the item
+            if let Some(held_stack) = self.ui.inventory_ui.held_item.take() {
+                // Calculate player's visual center (player.x/y is at feet)
+                let player_center_x = self.world.player.x;
+                let player_center_y = self.world.player.y - (self.world.player.height * SPRITE_SCALE / 2) as i32;
+
+                // Calculate position in front of player based on facing direction
+                let throw_distance = 48; // pixels in front of player
+                let diagonal_distance = (throw_distance as f32 * 0.707).round() as i32; // Normalize diagonal to same distance
+                let (offset_x, offset_y) = match self.world.player.direction {
+                    Direction::North => (0, -throw_distance),
+                    Direction::NorthEast => (diagonal_distance, -diagonal_distance),
+                    Direction::East => (throw_distance, 0),
+                    Direction::SouthEast => (diagonal_distance, diagonal_distance),
+                    Direction::South => (0, throw_distance),
+                    Direction::SouthWest => (-diagonal_distance, diagonal_distance),
+                    Direction::West => (-throw_distance, 0),
+                    Direction::NorthWest => (-diagonal_distance, -diagonal_distance),
+                };
+
+                let drop_x = player_center_x + offset_x;
+                let drop_y = player_center_y + offset_y;
+
+                // Get the item texture
+                let item_texture = self.textures.items
+                    .get(&held_stack.item_id)
+                    .ok_or(format!("Missing texture for item {}", held_stack.item_id))?;
+
+                // Spawn the dropped item
+                self.world.spawn_dropped_item(
+                    drop_x,
+                    drop_y,
+                    held_stack.item_id.clone(),
+                    held_stack.quantity,
+                    item_texture,
+                )?;
+
+                println!("Threw {} x{} in front of player", held_stack.item_id, held_stack.quantity);
                 return Ok(());
             }
         }

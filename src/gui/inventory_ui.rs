@@ -72,6 +72,9 @@ impl<'a> InventoryUI<'a> {
         mouse_x: i32,
         mouse_y: i32,
     ) -> Result<(), String> {
+        // Enable alpha blending for semi-transparent UI elements
+        canvas.set_blend_mode(sdl2::render::BlendMode::Blend);
+
         self.render_hotbar(canvas, player_inventory, selected_hotbar_slot)?;
 
         if self.is_open {
@@ -104,6 +107,9 @@ impl<'a> InventoryUI<'a> {
                 }
             }
         }
+
+        // Reset blend mode to default
+        canvas.set_blend_mode(sdl2::render::BlendMode::None);
 
         Ok(())
     }
